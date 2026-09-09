@@ -54,6 +54,20 @@ const addMinutesToTime = (time, minutesToAdd) => {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 };
 
+const calculateDowntimeMetrics = (session) => {
+  const operationMinutes = elapsedMinutes(session?.processStart, session?.processEnd);
+  const unplannedLosses = (session?.losses || []).filter(loss => loss.category === 'availability');
+  const downtimeMinutes = unplannedLosses.reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
+  const productiveMinutes = Math.max(0, operationMinutes - downtimeMinutes);
+  return {
+    operationMinutes,
+    downtimeMinutes,
+    productiveMinutes,
+    availability: operationMinutes > 0 ? (productiveMinutes / operationMinutes) * 100 : 0,
+    incidents: unplannedLosses.length
+  };
+};
+
 const monthLabels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 const getWeekKey = (dateText) => {
@@ -76,9 +90,9 @@ const PRODUCTION_LINE_OPERATORS = [
   { id: "OP-B01-002", name: "Aaron Flores", machines: ["Blistera B-01"] },
   { id: "OP-B01-003", name: "Josue Huapaya", machines: ["*"] }
 ];
-const DEMO_CREDENTIALS = {
-  supervisor: { username: "molin", password: "password", name: "Molin" },
-  responsible_operator: { username: "Josue.Huapaya", password: "password", name: "Josue Huapaya", id: "OP-B01-003" }
+const APP_PROFILES = {
+  supervisor: { name: "Supervisor Biomont" },
+  responsible_operator: { name: "Josue Huapaya", id: "OP-B01-003" }
 };
 
 const WORK_ORDER_STATUS: Record<string, { label: string; variant: BadgeVariant }> = {
@@ -206,10 +220,12 @@ const TimeField = ({ value, onChange, label }: { value: string; onChange: (value
   );
 };
 
-const RecordDetails = ({ record, metrics }: { record: any; metrics: any; readOnly?: boolean }) => {
-  if (!record || !metrics) return null;
-  const tickets = (record.losses || []).filter(loss => loss.ticketCode || loss.ticket);
-  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Producto</p><p className="font-bold">{record.product}</p></div><div><p className="text-xs text-slate-500">Máquina</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || 'Pendiente'}</p></div></div><div className="grid grid-cols-5 gap-2">{[['OEE',metrics.oee,'%'],['Disp.',metrics.a,'%'],['Vel. equipo',metrics.p,'%'],['Calidad',metrics.q,'%'],['TNI',metrics.tni,' min']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(2)}{unit}</p></div>)}</div><div className="rounded-lg border border-slate-200 p-4 text-sm"><p><strong>Horario manual:</strong> {record.processStart || '--:--'} a {record.processEnd || '--:--'}</p><p className="mt-1"><strong>Producción:</strong> {Number(record.realQty || 0).toLocaleString()} und · <strong>Velocidad estándar:</strong> {Number(record.standardSpeed || 0)} und/min</p><p className="mt-1"><strong>Eventos:</strong> {(record.losses || []).length} · <strong>Sobrepesos:</strong> {(record.overweights || []).length} · <strong>Descartes:</strong> {(record.materialDiscards || []).length}</p></div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-amber-800">{loss.cause} · Prioridad {loss.ticket?.priority || 'No indicada'}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p><p className="mt-1 text-xs text-slate-500">Reportado por: {loss.ticket?.reportedBy || record.operator || 'Sin dato'}</p></div>)}</div></div>}</div>;
+const RecordDetails = ({ record }: { record: any; metrics?: any; readOnly?: boolean }) => {
+  if (!record) return null;
+  const metrics = calculateDowntimeMetrics(record);
+  const losses = (record.losses || []).filter(loss => loss.category === 'availability');
+  const tickets = losses.filter(loss => loss.ticketCode || loss.ticket);
+  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Lote</p><p className="font-bold">{record.lot || 'Sin lote'}</p></div><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Equipo</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || record.registrar || 'Sin registrador'}</p></div></div><div className="grid gap-2 sm:grid-cols-4">{[['Tiempo operación',metrics.operationMinutes,' min'],['Detenciones',metrics.downtimeMinutes,' min'],['Disponibilidad',metrics.availability,'%'],['Incidencias',metrics.incidents,'']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(unit === '%' ? 2 : 0)}{unit}</p></div>)}</div><div><h4 className="mb-2 font-bold text-slate-800">Detenciones no planificadas</h4>{losses.length ? <div className="space-y-2">{losses.map(loss => <div key={loss.id} className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm"><div className="flex justify-between gap-3"><p className="font-bold text-rose-900">{loss.cause}</p><p className="font-bold text-rose-700">{Number(loss.duration || 0)} min</p></div><p className="mt-1 text-slate-600">{loss.comment || 'Sin comentario'}</p></div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Sin detenciones registradas.</p>}</div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p></div>)}</div></div>}</div>;
 };
 
 export default function OEEApplication() {
@@ -257,8 +273,8 @@ export default function OEEApplication() {
   const [activeSession, setActiveSession] = useState(() => loadStoredCatalog('bioee-active-session', null));
 
   const currentUser = role === 'responsible_operator'
-    ? (productionLineOperators.find(operator => operator.id === loginOperatorId) || DEMO_CREDENTIALS.responsible_operator)
-    : role ? DEMO_CREDENTIALS[role] : null;
+    ? (productionLineOperators.find(operator => operator.id === loginOperatorId) || APP_PROFILES.responsible_operator)
+    : role ? APP_PROFILES[role] : null;
 
   const applySharedState = (sharedData) => {
     if (!sharedData || typeof sharedData !== 'object') return;
@@ -464,17 +480,17 @@ export default function OEEApplication() {
         <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden">
           <div className="p-8 bg-blue-600 text-center">
             <BiomontLogo className="w-52 h-auto mx-auto mb-4" />
-            <h1 className="text-2xl font-bold text-white">BIOEE</h1>
-            <p className="text-blue-100 mt-2">Sistema de Gestión y Medición de OEE</p>
+            <h1 className="text-2xl font-bold text-white">Basic OEE v2</h1>
+            <p className="text-blue-100 mt-2">Control de detenciones no planificadas</p>
           </div>
           <div className="space-y-4 p-8">
             <div className="text-center">
               <h2 className="text-lg font-bold text-slate-900">Selecciona tu perfil</h2>
-              <p className="mt-1 text-sm text-slate-500">Elige cómo deseas ingresar a BIOEE.</p>
+              <p className="mt-1 text-sm text-slate-500">Elige cómo deseas ingresar.</p>
             </div>
             <button type="button" onClick={() => enterWithRole('responsible_operator')} className="flex w-full items-center gap-4 rounded-xl border-2 border-blue-100 p-4 text-left transition hover:border-blue-500 hover:bg-blue-50">
               <span className="rounded-xl bg-blue-100 p-3 text-blue-700"><User size={24} /></span>
-              <span><span className="block font-bold text-slate-900">Operario</span><span className="text-sm text-slate-500">Registrar y actualizar información OEE</span></span>
+              <span><span className="block font-bold text-slate-900">Operario</span><span className="text-sm text-slate-500">Registrar detenciones no planificadas por OT</span></span>
             </button>
             <button type="button" onClick={() => enterWithRole('supervisor')} className="flex w-full items-center gap-4 rounded-xl border-2 border-emerald-100 p-4 text-left transition hover:border-emerald-500 hover:bg-emerald-50">
               <span className="rounded-xl bg-emerald-100 p-3 text-emerald-700"><CheckSquare size={24} /></span>
@@ -600,6 +616,44 @@ export default function OEEApplication() {
       </div>
     </div>
   );
+
+  const BasicDashboardView = () => {
+    const liveRecord = activeSession ? { ...activeSession, workOrderId: activeSession.id, status: 'in_progress' } : null;
+    const allRecords = [...records, ...(liveRecord ? [liveRecord] : [])];
+    const lots = Array.from(new Set(allRecords.map(record => record.lot).filter(Boolean))).sort();
+    const orders = dashboardLot ? Array.from(new Set(allRecords.filter(record => record.lot === dashboardLot).map(record => record.workOrderId || record.id))).sort() : [];
+    const filteredRecords = allRecords.filter(record => (!dashboardLot || record.lot === dashboardLot) && (!dashboardOrder || (record.workOrderId || record.id) === dashboardOrder));
+    const metrics = filteredRecords.map(record => ({ record, ...calculateDowntimeMetrics(record) }));
+    const operationMinutes = metrics.reduce((sum, item) => sum + item.operationMinutes, 0);
+    const downtimeMinutes = metrics.reduce((sum, item) => sum + item.downtimeMinutes, 0);
+    const productiveMinutes = Math.max(0, operationMinutes - downtimeMinutes);
+    const availability = operationMinutes > 0 ? productiveMinutes / operationMinutes * 100 : 0;
+    const incidents = metrics.reduce((sum, item) => sum + item.incidents, 0);
+    const causeMap = filteredRecords.flatMap(record => (record.losses || []).filter(loss => loss.category === 'availability')).reduce((summary, loss) => {
+      summary[loss.cause] = (summary[loss.cause] || 0) + Number(loss.duration || 0);
+      return summary;
+    }, {});
+    const causes = Object.entries(causeMap).map(([cause, minutes]) => ({ cause, minutes: Number(minutes) })).sort((a, b) => b.minutes - a.minutes);
+    const totalLoss = causes.reduce((sum, item) => sum + item.minutes, 0);
+    let accumulated = 0;
+    const pareto = causes.map(item => { accumulated += item.minutes; return { ...item, cumulative: totalLoss ? accumulated / totalLoss * 100 : 0 }; });
+    const machineMap = filteredRecords.reduce((summary, record) => {
+      const machine = record.machine || 'Sin equipo';
+      if (!summary[machine]) summary[machine] = { machine, minutes: 0, incidents: 0 };
+      const rowMetrics = calculateDowntimeMetrics(record);
+      summary[machine].minutes += rowMetrics.downtimeMinutes;
+      summary[machine].incidents += rowMetrics.incidents;
+      return summary;
+    }, {});
+    const machines = Object.values(machineMap).sort((a: any, b: any) => b.minutes - a.minutes);
+
+    return <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="overflow-hidden rounded-2xl bg-gradient-to-r from-slate-950 via-blue-950 to-blue-700 p-7 text-white shadow-xl"><div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-200">Centro de control · Basic OEE v2</p><h2 className="mt-3 text-4xl font-bold">Detenciones no planificadas</h2><p className="mt-2 text-blue-100">Seguimiento de paradas, disponibilidad y causas por lote y OT.</p></div><div className="grid gap-3 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-semibold text-blue-100">Lote</label><select className="min-w-52 rounded-lg border border-white/20 bg-white p-3 text-slate-900" value={dashboardLot} onChange={event => { setDashboardLot(event.target.value); setDashboardOrder(''); }}><option value="">Todos los lotes</option>{lots.map(lot => <option key={lot}>{lot}</option>)}</select></div><div><label className="mb-1 block text-xs font-semibold text-blue-100">OT</label><select className="min-w-52 rounded-lg border border-white/20 bg-white p-3 text-slate-900 disabled:opacity-60" value={dashboardOrder} disabled={!dashboardLot} onChange={event => setDashboardOrder(event.target.value)}><option value="">Todas las OT</option>{orders.map(order => <option key={order}>{order}</option>)}</select></div></div></div></div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-5"><p className="text-sm text-slate-500">Tiempo de operación</p><p className="mt-1 text-3xl font-bold text-slate-900">{operationMinutes.toFixed(0)} min</p></Card><Card className="border-l-4 border-l-rose-500 p-5"><p className="text-sm text-slate-500">Detención no planificada</p><p className="mt-1 text-3xl font-bold text-rose-600">{downtimeMinutes.toFixed(0)} min</p></Card><Card className="border-l-4 border-l-emerald-500 p-5"><p className="text-sm text-slate-500">Disponibilidad</p><p className="mt-1 text-3xl font-bold text-emerald-600">{availability.toFixed(2)}%</p></Card><Card className="border-l-4 border-l-amber-500 p-5"><p className="text-sm text-slate-500">Incidencias registradas</p><p className="mt-1 text-3xl font-bold text-amber-600">{incidents}</p></Card></div>
+      <div className="grid gap-6 xl:grid-cols-2"><Card className="p-6"><h3 className="text-lg font-bold text-slate-900">Pareto de detenciones</h3><p className="mb-5 text-sm text-slate-500">Causas ordenadas de mayor a menor por minutos perdidos.</p><div className="h-80">{pareto.length ? <ResponsiveContainer><ComposedChart data={pareto} margin={{top:10,right:10,bottom:65,left:0}}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="cause" interval={0} angle={-30} textAnchor="end" height={85}/><YAxis yAxisId="minutes"/><YAxis yAxisId="percentage" orientation="right" domain={[0,100]} tickFormatter={value => `${value}%`}/><RechartsTooltip/><Bar yAxisId="minutes" dataKey="minutes" name="Minutos" fill="#f43f5e" radius={[6,6,0,0]}/><Line yAxisId="percentage" dataKey="cumulative" name="Acumulado" stroke="#0f172a" strokeWidth={3}/></ComposedChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-slate-400">Sin detenciones para los filtros seleccionados.</div>}</div></Card><Card className="p-6"><h3 className="text-lg font-bold text-slate-900">Pérdida por equipo</h3><p className="mb-5 text-sm text-slate-500">Minutos de detención acumulados.</p><div className="h-80">{machines.length ? <ResponsiveContainer><BarChart data={machines} layout="vertical" margin={{left:30}}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number"/><YAxis type="category" dataKey="machine" width={120}/><RechartsTooltip/><Bar dataKey="minutes" name="Minutos" fill="#2563eb" radius={[0,6,6,0]}/></BarChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-slate-400">Sin información registrada.</div>}</div></Card></div>
+      <Card><div className="border-b border-slate-200 p-5"><h3 className="text-lg font-bold text-slate-900">Resumen por OT</h3></div><div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-4">Lote</th><th className="p-4">OT</th><th className="p-4">Equipo</th><th className="p-4 text-right">Operación</th><th className="p-4 text-right">Detenciones</th><th className="p-4 text-right">Disponibilidad</th></tr></thead><tbody className="divide-y divide-slate-100">{metrics.map(({record,...item}) => <tr key={record.id}><td className="p-4 font-medium">{record.lot || '-'}</td><td className="p-4">{record.workOrderId || record.id}</td><td className="p-4">{record.machine}</td><td className="p-4 text-right">{item.operationMinutes.toFixed(0)} min</td><td className="p-4 text-right font-bold text-rose-600">{item.downtimeMinutes.toFixed(0)} min</td><td className="p-4 text-right font-bold">{item.availability.toFixed(2)}%</td></tr>)}{!metrics.length && <tr><td colSpan={6} className="p-8 text-center text-slate-500">No hay registros para mostrar.</td></tr>}</tbody></table></div></Card>
+    </div>;
+  };
 
   const DashboardView = () => {
     const liveRecord = activeSession ? { ...activeSession, id: `LIVE-${activeSession.id}`, date: new Date().toISOString().slice(0, 10), metrics: calculateSessionMetrics(activeSession), status: 'in_progress' } : null;
@@ -838,7 +892,7 @@ export default function OEEApplication() {
                            setActiveSession(current => current?.id === ot.id ? current : {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, productionRegistered: false, losses: [], supportOperators: [], overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: ot.targetWeight || '', standardSpeed: Number(ot.standardSpeed) || plantEquipment.find(machine => machine.name === ot.machine || machine.id === ot.machine)?.standardSpeed || 0, processStart: '00:00', processEnd: '00:00', performanceEndTime: ''});
                           setWorkOrders(current => current.map(order => order.id === ot.id ? { ...order, status: 'in_progress', registrar: currentUser.name } : order));
                           setCurrentView('active_production');
-                        }}>{ot.status === 'in_progress' ? 'Continuar OEE' : 'Registrar OEE'} <ArrowRight size={16} /></Button>
+                        }}>{ot.status === 'in_progress' ? 'Continuar registro' : 'Registrar detenciones'} <ArrowRight size={16} /></Button>
                       )}
                     </td>
                   </tr>
@@ -848,7 +902,7 @@ export default function OEEApplication() {
             </table>
           </div>
         </Card>
-        <Modal isOpen={Boolean(selectedLiveOrder)} onClose={() => setSelectedLiveOrder(null)} title="Detalle OEE en tiempo real"><RecordDetails record={selectedLiveOrder} metrics={selectedLiveOrder ? calculateSessionMetrics(selectedLiveOrder) : null} readOnly /></Modal>
+        <Modal isOpen={Boolean(selectedLiveOrder)} onClose={() => setSelectedLiveOrder(null)} title="Detenciones en tiempo real"><RecordDetails record={selectedLiveOrder} metrics={selectedLiveOrder ? calculateSessionMetrics(selectedLiveOrder) : null} readOnly /></Modal>
       </div>
     );
   };
@@ -878,7 +932,8 @@ export default function OEEApplication() {
     if (!activeSession) return <div>No hay sesión activa.</div>;
 
     const metrics = calculateSessionMetrics(activeSession);
-    const mandatoryReady = activeSession.losses.some(loss => loss.category === 'planned_availability') && (activeSession.overweights || []).length > 0 && activeSession.productionRegistered && (activeSession.materialDiscards || []).length > 0;
+    const downtimeMetrics = calculateDowntimeMetrics(activeSession);
+    const mandatoryReady = Boolean(activeSession.processStart && activeSession.processEnd);
     const supportCandidates = [...productionLineOperators, ...supportOperators].filter((operator, index, list) => list.findIndex(item => item.id === operator.id) === index);
     const filteredSupportOperators = supportCandidates.filter(operator => `${operator.name} ${operator.id}`.toLowerCase().includes(supportSearch.trim().toLowerCase()));
     const requiresMaintenanceTicket = lossForm.cause === 'Avería mecánica' || lossForm.cause === 'Avería eléctrica';
@@ -951,7 +1006,7 @@ export default function OEEApplication() {
     };
 
     const deleteLoss = (loss) => {
-      if (!window.confirm(`¿Eliminar el evento "${loss.cause}"? Esta acción actualizará el OEE.`)) return;
+      if (!window.confirm(`¿Eliminar el evento "${loss.cause}"? Esta acción actualizará los indicadores.`)) return;
       setActiveSession(current => normalizeLosses(current, current.losses.filter(item => item.id !== loss.id)));
     };
 
@@ -1084,6 +1139,7 @@ export default function OEEApplication() {
       const mergeById = (sessionItems = [], orderItems = []) => Array.from(new Map([...sessionItems, ...orderItems].map(item => [item.id, item])).values());
       const recordToSave = {
         ...activeSession,
+        losses: (activeSession.losses || []).filter(loss => loss.category === 'availability'),
         targetWeight: activeSession.targetWeight || linkedOrder?.targetWeight,
         overweights: mergeById(activeSession.overweights, linkedOrder?.overweights),
         materialDiscards: mergeById(activeSession.materialDiscards, linkedOrder?.materialDiscards),
@@ -1128,54 +1184,21 @@ export default function OEEApplication() {
           </div>
         </div>
 
-        {/* Real-time KPI Dashboard */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-          <Card className="p-4 border-l-4 border-l-blue-500 bg-blue-50/50">
-            <p className="text-sm font-medium text-slate-600">OEE Calculado</p>
-            <h3 className="text-3xl font-bold" style={{color: getOEEColor(metrics.oee)}}>{metrics.oee.toFixed(2)}%</h3>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-amber-500">
-            <p className="text-sm font-medium text-slate-600">Disponibilidad</p>
-            <h3 className="text-2xl font-bold text-slate-800">{metrics.a.toFixed(2)}%</h3>
-            <p className="text-xs text-rose-500 mt-1">{metrics.availLoss} min perdidos</p>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-purple-500">
-            <p className="text-sm font-medium text-slate-600">Velocidad de equipo</p>
-            <h3 className="text-2xl font-bold text-slate-800">{metrics.p.toFixed(2)}%</h3>
-            <p className="text-xs text-purple-600 mt-1">{metrics.effectiveSpeed.toFixed(2)} / {metrics.standardSpeed} und/min</p>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-emerald-500">
-            <p className="text-sm font-medium text-slate-600">Calidad</p>
-            <h3 className="text-2xl font-bold text-slate-800">{metrics.q.toFixed(2)}%</h3>
-            <p className="text-xs text-emerald-600 mt-1">{activeSession.goodQty} und buenas</p>
-          </Card>
-          <Card className="border-l-4 border-l-slate-500 p-4"><p className="text-sm font-medium text-slate-600">TNI automático</p><h3 className="text-2xl font-bold text-slate-800">{Number(metrics.tni || 0).toFixed(2)} min</h3><p className="mt-1 text-xs text-slate-500">Tiempo no identificado</p><p className="mt-1 text-[11px] text-slate-400">Plan teórico menos tiempo de operación y detenciones registradas.</p></Card>
-        </div>
+        <div className="grid gap-4 md:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-4"><p className="text-sm font-medium text-slate-600">Tiempo de operación</p><h3 className="text-2xl font-bold text-slate-900">{downtimeMetrics.operationMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-rose-500 p-4"><p className="text-sm font-medium text-slate-600">Detención acumulada</p><h3 className="text-2xl font-bold text-rose-600">{downtimeMetrics.downtimeMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-emerald-500 p-4"><p className="text-sm font-medium text-slate-600">Disponibilidad</p><h3 className="text-2xl font-bold text-emerald-600">{downtimeMetrics.availability.toFixed(2)}%</h3></Card><Card className="border-l-4 border-l-amber-500 p-4"><p className="text-sm font-medium text-slate-600">Incidencias</p><h3 className="text-2xl font-bold text-amber-600">{downtimeMetrics.incidents}</h3></Card></div>
 
-        {/* Ordered factor registration panel */}
-        <div className="mt-8 mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-800">Registros obligatorios</h3><p className="text-sm text-slate-500">Completa la información necesaria para enviar la OEE a revisión.</p></div><Button variant="secondary" className="!py-2" onClick={openSupportModal}><Users size={18}/> Personal de apoyo ({activeSession.supportOperators.length})</Button></div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <button onClick={() => openNewLoss('planned_availability')} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-slate-200 bg-white p-4 transition-all hover:border-sky-500 hover:shadow-md"><div className="mb-2 rounded-full bg-sky-100 p-3 text-sky-700"><CheckSquare size={24}/></div><span className="font-bold text-slate-800">Detenciones planificadas</span><span className="text-center text-xs text-slate-500">Set up, limpieza y mantenimiento</span></button>
-          <button onClick={openOverweightModal} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-slate-200 bg-white p-4 transition-all hover:border-cyan-500 hover:shadow-md"><div className="mb-2 rounded-full bg-cyan-100 p-3 text-cyan-700"><Scale size={24}/></div><span className="font-bold text-slate-800">Sobrepesos</span><span className="text-xs text-slate-500">{(activeSession.overweights || []).length} medición(es)</span></button>
-          <button onClick={() => { const production = activeSession.losses.find(loss => loss.category === 'quality'); production ? openEditLoss(production) : openNewLoss('quality'); }} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-slate-200 bg-white p-4 transition-all hover:border-rose-500 hover:shadow-md"><div className="mb-2 rounded-full bg-rose-100 p-3 text-rose-600"><AlertTriangle size={24}/></div><span className="font-bold text-slate-800">Producción real</span><span className="text-center text-xs text-slate-500">Unidades buenas, reproceso y desperdicio</span></button>
-          <button onClick={() => setMaterialModalOpen(true)} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-slate-200 bg-white p-4 transition-all hover:border-orange-500 hover:shadow-md"><div className="mb-2 rounded-full bg-orange-100 p-3 text-orange-700"><PackageMinus size={24}/></div><span className="font-bold text-slate-800">Descarte</span><span className="text-xs text-slate-500">{(activeSession.materialDiscards || []).length} registro(s)</span></button>
-        </div>
-        <div className="mb-4 mt-8"><h3 className="text-lg font-bold text-slate-800">Registros opcionales</h3><p className="text-sm text-slate-500">Registra valores en caso se haya suscitado un evento relacionado.</p></div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <button onClick={() => openNewLoss('availability')} className="flex min-h-32 flex-col items-center justify-center rounded-xl border-2 border-slate-200 bg-white p-4 transition-all hover:border-amber-500 hover:shadow-md"><div className="mb-2 rounded-full bg-amber-100 p-3 text-amber-600"><Pause size={24}/></div><span className="font-bold text-slate-800">Detenciones no planificadas</span><span className="text-center text-xs text-slate-500">Averías, bloqueos y servicios</span></button>
-          <button onClick={() => openNewLoss('performance')} className="flex min-h-32 flex-col items-center justify-center rounded-xl border-2 border-slate-200 bg-white p-4 transition-all hover:border-purple-500 hover:shadow-md"><div className="mb-2 rounded-full bg-purple-100 p-3 text-purple-600"><AlertOctagon size={24}/></div><span className="font-bold text-slate-800">Velocidad de equipo</span><span className="text-center text-xs text-slate-500">Motivo y comentario cualitativo</span></button>
-        </div>
+        <div className="mt-8 mb-4"><h3 className="text-lg font-bold text-slate-800">Registro de detenciones</h3><p className="text-sm text-slate-500">Registra exclusivamente eventos no planificados ocurridos durante la OT.</p></div>
+        <button onClick={() => openNewLoss('availability')} className="flex w-full min-h-36 items-center justify-center gap-4 rounded-xl border-2 border-rose-200 bg-white p-5 transition-all hover:border-rose-500 hover:bg-rose-50 hover:shadow-md"><div className="rounded-full bg-rose-100 p-4 text-rose-600"><Pause size={30}/></div><span className="text-left"><span className="block text-lg font-bold text-slate-800">Registrar detención no planificada</span><span className="text-sm text-slate-500">Averías mecánicas o eléctricas, bloqueos, cortes de servicio y otros.</span></span></button>
         {/* Recent Events Log */}
         <Card className="mt-8">
           <div className="p-4 border-b border-slate-200">
             <h3 className="font-bold text-slate-800">Eventos Registrados</h3>
           </div>
           <div className="p-0">
-            {activeSession.losses.length === 0 ? (
-              <p className="p-6 text-center text-slate-500">No hay pérdidas registradas en este turno.</p>
+            {activeSession.losses.filter(loss => loss.category === 'availability').length === 0 ? (
+              <p className="p-6 text-center text-slate-500">No hay detenciones no planificadas registradas.</p>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {activeSession.losses.map((loss) => (
+                {activeSession.losses.filter(loss => loss.category === 'availability').map((loss) => (
                   <li key={loss.id} className="p-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${
@@ -1213,7 +1236,7 @@ export default function OEEApplication() {
         {/* Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-white border-t border-slate-200 p-4 flex justify-between items-center z-40">
           <Button variant="ghost">Guardar Borrador</Button>
-          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Completa los cuatro registros obligatorios'}>
+          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Registra la hora de inicio y fin'}>
             <CheckCircle size={20} /> Finalizar y Enviar a Revisión
           </Button>
         </div>
@@ -1437,8 +1460,7 @@ export default function OEEApplication() {
         {selectedRecord ? (
           <Card>
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between bg-slate-50"><div className="flex items-center gap-4"><button onClick={() => setSelectedRecord(null)} className="p-2 hover:bg-slate-200 rounded-lg"><ArrowRight className="rotate-180" size={20} /></button><h3 className="text-lg font-bold">Detalle de OT: {selectedRecord.workOrderId || selectedRecord.id.replace(/^REC-/, '')}</h3></div><Badge variant={selectedRecord.status === 'validated' ? 'success' : 'warning'}>{WORK_ORDER_STATUS[selectedRecord.status]?.label || selectedRecord.status}</Badge></div>
-            <div className="p-6 space-y-6"><div className="grid grid-cols-2 md:grid-cols-5 gap-6"><div><p className="text-sm text-slate-500">Registrador</p><p className="font-semibold">{selectedRecord.registrar || selectedRecord.operator}</p></div><div><p className="text-sm text-slate-500">Máquina</p><p className="font-semibold">{selectedRecord.machine}</p></div><div><p className="text-sm text-slate-500">Producción</p><p className="font-semibold">{selectedRecord.realQty.toLocaleString()} und</p></div><div><p className="text-sm text-slate-500">OEE</p><p className="font-bold text-xl" style={{color: getOEEColor(calculateSessionMetrics(selectedRecord).oee)}}>{calculateSessionMetrics(selectedRecord).oee.toFixed(2)}%</p></div><div><p className="text-sm text-slate-500">TNI</p><p className="font-bold text-xl">{Number(calculateSessionMetrics(selectedRecord).tni || 0).toFixed(2)} min</p></div></div>
-            <div><h4 className="font-bold text-slate-800 mb-3">Eventos registrados</h4>{selectedRecord.losses.length === 0 ? <p className="text-slate-500">No se registraron pérdidas.</p> : <div className="space-y-2">{selectedRecord.losses.map(loss => <div key={loss.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3"><div className="flex justify-between gap-4"><span className="font-medium">{loss.cause}</span><span className="font-semibold">{loss.category === 'performance' ? 'Registro cualitativo' : loss.category === 'quality' ? `${Number(loss.goodQty || 0).toLocaleString()} und buenas` : loss.duration ? `${loss.duration} min` : `${loss.qty} und`}</span></div>{loss.category === 'performance' && loss.comment && <p className="mt-2 text-sm text-slate-600">{loss.comment}</p>}{(loss.ticketCode || loss.ticket) && <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">Ticket {loss.ticketCode || loss.ticket?.code}</p><p className="text-amber-800">Prioridad: {loss.ticket?.priority || 'No indicada'}</p><p className="text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p><p className="text-xs text-slate-500">Reportado por: {loss.ticket?.reportedBy || selectedRecord.operator || 'Sin dato'}</p></div>}</div>)}</div>}</div>
+            <div className="p-6 space-y-6"><RecordDetails record={selectedRecord} readOnly />
             {selectedRecord.status === 'review' && <div className="flex gap-4 border-t pt-4"><Button variant="danger" className="flex-1" onClick={() => setObservationModalOpen(true)}><Edit size={18}/> Observado</Button><Button variant="success" className="flex-1" onClick={approveRecord}><CheckCircle size={18}/> Aprobar y validar</Button></div>}</div>
           </Card>
         ) : (
@@ -1452,7 +1474,7 @@ export default function OEEApplication() {
   };
 
   const AdministrationView = () => {
-    const categoryLabels = { planned_availability: 'Detenciones planificadas', availability: 'Detenciones no planificadas', performance: 'Velocidad de equipo', quality: 'Rechazos de calidad' };
+    const categoryLabels = { availability: 'Detenciones no planificadas' };
     const productionMachines = Array.from(new Set(plantEquipment.map(machine => machine.name).filter(Boolean))) as string[];
     const addCause = () => {
       const cause = adminNewCause.trim();
@@ -1522,7 +1544,7 @@ export default function OEEApplication() {
 
   const AIAssistantView = () => {
     const [messages, setMessages] = useState([
-      { role: 'ai', text: 'Hola Carlos. Soy tu asistente experto en OEE. He analizado los datos del último mes de la Planta Norte. ¿En qué te puedo ayudar a profundizar hoy?' }
+      { role: 'ai', text: 'Hola Carlos. He analizado las detenciones no planificadas registradas. ¿Qué equipo, causa u orden deseas revisar?' }
     ]);
     const [input, setInput] = useState('');
     const messagesEndRef = useRef(null);
@@ -1545,12 +1567,12 @@ export default function OEEApplication() {
         let aiResponse = "He revisado la base de datos. ";
         const lowerInput = input.toLowerCase();
         
-        if(lowerInput.includes('limpieza') || lowerInput.includes('pérdida')) {
-          aiResponse += "El tiempo de limpieza profunda en la Blistera B-01 ha aumentado un 15% esta semana. Te sugiero revisar el nuevo procedimiento implementado el lunes.";
-        } else if (lowerInput.includes('oee') || lowerInput.includes('tendencia')) {
-          aiResponse += "La tendencia del OEE es positiva (subió de 74% a 76.4%), impulsada principalmente por una reducción en microparadas en la Línea de Empaque 1.";
+        if(lowerInput.includes('avería') || lowerInput.includes('pérdida')) {
+          aiResponse += "Las averías concentran la mayor parte del tiempo de detención no planificada. Conviene priorizar el equipo con más minutos acumulados.";
+        } else if (lowerInput.includes('disponibilidad') || lowerInput.includes('tendencia')) {
+          aiResponse += "La disponibilidad se calcula usando el tiempo de operación registrado menos las detenciones no planificadas.";
         } else {
-          aiResponse += "Las principales oportunidades de mejora actuales se concentran en reducir los tiempos de Cambio de Formato, que representan el 30% del tiempo total detenido histórico.";
+          aiResponse += "Las principales oportunidades se muestran por causa, máquina y orden de trabajo para facilitar la priorización del mantenimiento.";
         }
 
         setMessages([...newMessages, { role: 'ai', text: aiResponse }]);
@@ -1604,7 +1626,7 @@ export default function OEEApplication() {
       {/* Sidebar */}
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-slate-900 text-slate-300 flex flex-col transition-all duration-300 z-50 shadow-xl`}>
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 bg-slate-950">
-          {isSidebarOpen && <span className="font-bold text-lg text-white tracking-tight flex items-center gap-2"><BiomontLogo className="w-24 h-auto" /> <span>BIOEE</span></span>}
+          {isSidebarOpen && <span className="font-bold text-lg text-white tracking-tight flex items-center gap-2"><BiomontLogo className="w-24 h-auto" /> <span>Basic OEE</span></span>}
           <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="p-1 hover:bg-slate-800 rounded">
             {isSidebarOpen ? <X size={20} /> : <BiomontLogo className="w-10 h-auto" />}
           </button>
@@ -1660,7 +1682,7 @@ export default function OEEApplication() {
         {/* Dynamic Content Scrollable Area */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50">
           <div className="max-w-7xl mx-auto">
-            {currentView === 'dashboard' && <DashboardView />}
+            {currentView === 'dashboard' && <BasicDashboardView />}
             {currentView === 'work_orders' && WorkOrdersView()}
             {currentView === 'active_production' && <ActiveProductionView />}
             {currentView === 'validations' && <ValidationsView />}
