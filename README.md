@@ -1,6 +1,13 @@
-# OEE App Biomont
+# Basic OEE v2
 
-Aplicación de gestión OEE para el seguimiento de órdenes de trabajo, producción y validaciones.
+Versión simplificada de BIOEE para registrar y analizar exclusivamente detenciones no planificadas por lote, orden de trabajo y equipo.
+
+## Alcance funcional
+
+- El operario selecciona una OT y registra causa, duración, comentario y ticket de mantenimiento cuando corresponde.
+- El supervisor conserva Dashboard, Órdenes OT, Validaciones, Administración y Asistente IA.
+- El Dashboard mide tiempo de operación, minutos detenidos, disponibilidad e incidencias.
+- Incluye Pareto de causas, pérdida por equipo y resumen por OT.
 
 ## Ejecutar localmente
 
@@ -30,8 +37,8 @@ set role = 'supervisor'
 where id = (select id from auth.users where email = 'correo@biomont.com.pe');
 ```
 
-Mientras las variables no estén configuradas, BIOEE conserva el modo demostración local. Cuando estén disponibles, el acceso cambia automáticamente a correo y contraseña mediante Supabase Auth.
+El acceso inicial permite seleccionar directamente Operario o Supervisor. Si se configura Supabase, debe usarse un proyecto independiente del utilizado por BIOEE para no mezclar datos.
 
 ## Editar en línea
 
-Abre [github.dev](https://github.dev/Mao1216/oee-app-biomont) para editar el repositorio desde VS Code en el navegador.
+Una vez creado el repositorio, podrá editarse desde `https://github.dev/Mao1216/basic_oee_v2`.
