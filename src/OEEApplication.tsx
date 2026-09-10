@@ -92,7 +92,7 @@ const PRODUCTION_LINE_OPERATORS = [
 ];
 const APP_PROFILES = {
   supervisor: { name: "Supervisor Biomont" },
-  responsible_operator: { name: "Josue Huapaya", id: "OP-B01-003" }
+  responsible_operator: { name: "Josue Huapaya", id: "OP-B01-003", machines: ["*"] }
 };
 
 const WORK_ORDER_STATUS: Record<string, { label: string; variant: BadgeVariant }> = {
@@ -281,9 +281,15 @@ export default function OEEApplication() {
     applyingRemoteState.current = true;
     if (Array.isArray(sharedData.records)) setRecords(sharedData.records);
     if (Array.isArray(sharedData.workOrders)) setWorkOrders(sharedData.workOrders);
-    if (Array.isArray(sharedData.productionLineOperators)) setProductionLineOperators(sharedData.productionLineOperators);
-    if (Array.isArray(sharedData.plantEquipment)) setPlantEquipment(sharedData.plantEquipment);
-    if (sharedData.lossCauses && typeof sharedData.lossCauses === 'object') setLossCauses(sharedData.lossCauses);
+    if (Array.isArray(sharedData.productionLineOperators)) {
+      setProductionLineOperators(sharedData.productionLineOperators.length ? sharedData.productionLineOperators : PRODUCTION_LINE_OPERATORS);
+    }
+    if (Array.isArray(sharedData.plantEquipment)) {
+      setPlantEquipment(sharedData.plantEquipment.length ? sharedData.plantEquipment : MACHINES);
+    }
+    if (sharedData.lossCauses && typeof sharedData.lossCauses === 'object' && Object.keys(sharedData.lossCauses).length) {
+      setLossCauses(sharedData.lossCauses);
+    }
     setActiveSession(sharedData.activeSession || null);
     window.setTimeout(() => { applyingRemoteState.current = false; }, 0);
   };
@@ -825,7 +831,8 @@ export default function OEEApplication() {
     const normalized = (value) => String(value || '').toLowerCase();
     const visibleWorkOrders = workOrders.filter((order) => {
       if (!activeStatuses.includes(order.status)) return false;
-      const operatorHasAccess = role === 'supervisor' || productionLineOperators.some(operator => operator.id === currentUser?.id && (operator.machines.includes('*') || operator.machines.some(machine => normalized(`${order.machine} ${order.line}`).includes(normalized(machine)))));
+      const assignedMachines = productionLineOperators.find(operator => operator.id === currentUser?.id)?.machines || currentUser?.machines || [];
+      const operatorHasAccess = role === 'supervisor' || assignedMachines.includes('*') || assignedMachines.some(machine => normalized(`${order.machine} ${order.line}`).includes(normalized(machine)));
       if (!operatorHasAccess) return false;
       return normalized(order.id).includes(normalized(workOrderFilters.code))
         && normalized(order.lot).includes(normalized(workOrderFilters.lot))
