@@ -7,7 +7,7 @@ import {
   LayoutDashboard, ClipboardList, CheckSquare, Activity, History, Bot, Settings,
   LogOut, Bell, User, Play, Pause, AlertTriangle, AlertOctagon, Wrench, CheckCircle,
   ChevronRight, ArrowRight, Save, Send, Edit, X, Plus, Search, Filter, MessageSquare, Upload, Users,
-  Eye, Download, Scale, PackageMinus, Trash2
+  Eye, Download, Scale, PackageMinus, PackageCheck, Trash2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from './lib/supabase';
@@ -130,6 +130,13 @@ const LOSS_CAUSES = {
   performance: ["Microparada de máquina", "Microparada de línea", "Atasco de material", "Ajuste menor", "Otros"],
   quality: ["Blister mal sellado", "Falta de lote/vencimiento", "Volumen incorrecto", "Contaminación cruzada"]
 };
+
+const normalizeLossCauses = (stored: Record<string, string[]> = {}) => Object.fromEntries(
+  Object.entries(LOSS_CAUSES).map(([category, defaults]) => [
+    category,
+    Array.from(new Set([...defaults, ...(Array.isArray(stored?.[category]) ? stored[category] : [])]))
+  ])
+);
 const CHART_DATA_TREND = [];
 const CHART_DATA_PARETO = [];
 
@@ -223,9 +230,9 @@ const TimeField = ({ value, onChange, label }: { value: string; onChange: (value
 const RecordDetails = ({ record }: { record: any; metrics?: any; readOnly?: boolean }) => {
   if (!record) return null;
   const metrics = calculateDowntimeMetrics(record);
-  const losses = (record.losses || []).filter(loss => loss.category === 'availability');
+  const losses = (record.losses || []).filter(loss => ['availability', 'planned_availability', 'quality'].includes(loss.category));
   const tickets = losses.filter(loss => loss.ticketCode || loss.ticket);
-  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Lote</p><p className="font-bold">{record.lot || 'Sin lote'}</p></div><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Equipo</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || record.registrar || 'Sin registrador'}</p></div></div><div className="grid gap-2 sm:grid-cols-4">{[['Tiempo operación',metrics.operationMinutes,' min'],['Detenciones',metrics.downtimeMinutes,' min'],['Disponibilidad',metrics.availability,'%'],['Incidencias',metrics.incidents,'']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(unit === '%' ? 2 : 0)}{unit}</p></div>)}</div><div><h4 className="mb-2 font-bold text-slate-800">Detenciones no planificadas</h4>{losses.length ? <div className="space-y-2">{losses.map(loss => <div key={loss.id} className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm"><div className="flex justify-between gap-3"><p className="font-bold text-rose-900">{loss.cause}</p><p className="font-bold text-rose-700">{Number(loss.duration || 0)} min</p></div><p className="mt-1 text-slate-600">{loss.comment || 'Sin comentario'}</p></div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Sin detenciones registradas.</p>}</div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p></div>)}</div></div>}</div>;
+  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Lote</p><p className="font-bold">{record.lot || 'Sin lote'}</p></div><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Equipo</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || record.registrar || 'Sin registrador'}</p></div></div><div className="grid gap-2 sm:grid-cols-4">{[['Tiempo operación',metrics.operationMinutes,' min'],['Det. no planificadas',metrics.downtimeMinutes,' min'],['Disponibilidad',metrics.availability,'%'],['Incidencias',metrics.incidents,'']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(unit === '%' ? 2 : 0)}{unit}</p></div>)}</div><div><h4 className="mb-2 font-bold text-slate-800">Registros de la OT</h4>{losses.length ? <div className="space-y-2">{losses.map(loss => <div key={loss.id} className={`rounded-lg border p-3 text-sm ${loss.category === 'planned_availability' ? 'border-sky-200 bg-sky-50' : loss.category === 'quality' ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}><div className="flex justify-between gap-3"><p className="font-bold text-slate-900">{loss.category === 'quality' ? 'Producción real' : loss.cause}</p><p className="font-bold">{loss.category === 'quality' ? `${Number(loss.goodQty || 0).toLocaleString()} und buenas` : `${Number(loss.duration || 0)} min`}</p></div><p className="mt-1 text-slate-600">{loss.comment || 'Sin comentario'}</p>{loss.supportOperators?.length > 0 && <p className="mt-1 text-xs font-medium text-sky-700">Apoyo: {loss.supportOperators.map(operator => `${operator.name} (${operator.hours} h)`).join(', ')}</p>}</div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Sin registros.</p>}</div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p></div>)}</div></div>}</div>;
 };
 
 export default function OEEApplication() {
@@ -242,8 +249,7 @@ export default function OEEApplication() {
   const [plantEquipment, setPlantEquipment] = useState(() => loadStoredCatalog('bioee-plant-equipment-v2', MACHINES));
   const [lossCauses, setLossCauses] = useState(() => {
     const stored = loadStoredCatalog('bioee-loss-causes', LOSS_CAUSES);
-    const availability = Array.isArray(stored.availability) ? stored.availability : [];
-    return { ...LOSS_CAUSES, ...stored, availability: availability.some(cause => cause.toLowerCase().includes('falla no identificada')) ? availability : [...availability, 'Falla no identificada (TNI)'] };
+    return normalizeLossCauses(stored);
   });
   const [adminSection, setAdminSection] = useState('');
   const [adminPlantSection, setAdminPlantSection] = useState('');
@@ -288,7 +294,7 @@ export default function OEEApplication() {
       setPlantEquipment(sharedData.plantEquipment.length ? sharedData.plantEquipment : MACHINES);
     }
     if (sharedData.lossCauses && typeof sharedData.lossCauses === 'object' && Object.keys(sharedData.lossCauses).length) {
-      setLossCauses(sharedData.lossCauses);
+      setLossCauses(normalizeLossCauses(sharedData.lossCauses));
     }
     setActiveSession(sharedData.activeSession || null);
     window.setTimeout(() => { applyingRemoteState.current = false; }, 0);
@@ -940,7 +946,7 @@ export default function OEEApplication() {
 
     const metrics = calculateSessionMetrics(activeSession);
     const downtimeMetrics = calculateDowntimeMetrics(activeSession);
-    const mandatoryReady = Boolean(activeSession.processStart && activeSession.processEnd);
+    const mandatoryReady = Boolean(activeSession.processStart && activeSession.processEnd && activeSession.productionRegistered);
     const supportCandidates = [...productionLineOperators, ...supportOperators].filter((operator, index, list) => list.findIndex(item => item.id === operator.id) === index);
     const filteredSupportOperators = supportCandidates.filter(operator => `${operator.name} ${operator.id}`.toLowerCase().includes(supportSearch.trim().toLowerCase()));
     const requiresMaintenanceTicket = lossForm.cause === 'Avería mecánica' || lossForm.cause === 'Avería eléctrica';
@@ -1146,7 +1152,7 @@ export default function OEEApplication() {
       const mergeById = (sessionItems = [], orderItems = []) => Array.from(new Map([...sessionItems, ...orderItems].map(item => [item.id, item])).values());
       const recordToSave = {
         ...activeSession,
-        losses: (activeSession.losses || []).filter(loss => loss.category === 'availability'),
+        losses: (activeSession.losses || []).filter(loss => ['availability', 'planned_availability', 'quality'].includes(loss.category)),
         targetWeight: activeSession.targetWeight || linkedOrder?.targetWeight,
         overweights: mergeById(activeSession.overweights, linkedOrder?.overweights),
         materialDiscards: mergeById(activeSession.materialDiscards, linkedOrder?.materialDiscards),
@@ -1193,19 +1199,23 @@ export default function OEEApplication() {
 
         <div className="grid gap-4 md:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-4"><p className="text-sm font-medium text-slate-600">Tiempo de operación</p><h3 className="text-2xl font-bold text-slate-900">{downtimeMetrics.operationMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-rose-500 p-4"><p className="text-sm font-medium text-slate-600">Detención acumulada</p><h3 className="text-2xl font-bold text-rose-600">{downtimeMetrics.downtimeMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-emerald-500 p-4"><p className="text-sm font-medium text-slate-600">Disponibilidad</p><h3 className="text-2xl font-bold text-emerald-600">{downtimeMetrics.availability.toFixed(2)}%</h3></Card><Card className="border-l-4 border-l-amber-500 p-4"><p className="text-sm font-medium text-slate-600">Incidencias</p><h3 className="text-2xl font-bold text-amber-600">{downtimeMetrics.incidents}</h3></Card></div>
 
-        <div className="mt-8 mb-4"><h3 className="text-lg font-bold text-slate-800">Registro de detenciones</h3><p className="text-sm text-slate-500">Registra exclusivamente eventos no planificados ocurridos durante la OT.</p></div>
-        <button onClick={() => openNewLoss('availability')} className="flex w-full min-h-36 items-center justify-center gap-4 rounded-xl border-2 border-rose-200 bg-white p-5 transition-all hover:border-rose-500 hover:bg-rose-50 hover:shadow-md"><div className="rounded-full bg-rose-100 p-4 text-rose-600"><Pause size={30}/></div><span className="text-left"><span className="block text-lg font-bold text-slate-800">Registrar detención no planificada</span><span className="text-sm text-slate-500">Averías mecánicas o eléctricas, bloqueos, cortes de servicio y otros.</span></span></button>
+        <div className="mt-8 mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-800">Registros de la OT</h3><p className="text-sm text-slate-500">Registra producción real y los eventos de disponibilidad ocurridos durante el proceso.</p></div><Button variant="secondary" className="!py-2" onClick={openSupportModal}><Users size={18}/> Personal de apoyo ({activeSession.supportOperators.length})</Button></div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <button onClick={() => openNewLoss('planned_availability')} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-sky-200 bg-white p-4 transition-all hover:border-sky-500 hover:shadow-md"><div className="mb-2 rounded-full bg-sky-100 p-3 text-sky-700"><CheckSquare size={24}/></div><span className="font-bold text-slate-800">Detenciones planificadas</span><span className="text-center text-xs text-slate-500">Set up, limpieza y mantenimiento preventivo</span></button>
+          <button onClick={() => openNewLoss('availability')} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-rose-200 bg-white p-4 transition-all hover:border-rose-500 hover:shadow-md"><div className="mb-2 rounded-full bg-rose-100 p-3 text-rose-600"><Pause size={24}/></div><span className="font-bold text-slate-800">Detenciones no planificadas</span><span className="text-center text-xs text-slate-500">Averías, bloqueos, cortes de servicio y otros</span></button>
+          <button onClick={() => { const production = activeSession.losses.find(loss => loss.category === 'quality'); production ? openEditLoss(production) : openNewLoss('quality'); }} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-emerald-200 bg-white p-4 transition-all hover:border-emerald-500 hover:shadow-md"><div className="mb-2 rounded-full bg-emerald-100 p-3 text-emerald-700"><PackageCheck size={24}/></div><span className="font-bold text-slate-800">Producción real</span><span className="text-center text-xs text-slate-500">Unidades buenas, reproceso y desperdicio</span></button>
+        </div>
         {/* Recent Events Log */}
         <Card className="mt-8">
           <div className="p-4 border-b border-slate-200">
             <h3 className="font-bold text-slate-800">Eventos Registrados</h3>
           </div>
           <div className="p-0">
-            {activeSession.losses.filter(loss => loss.category === 'availability').length === 0 ? (
-              <p className="p-6 text-center text-slate-500">No hay detenciones no planificadas registradas.</p>
+            {activeSession.losses.filter(loss => ['availability', 'planned_availability', 'quality'].includes(loss.category)).length === 0 ? (
+              <p className="p-6 text-center text-slate-500">No hay eventos ni producción registrados.</p>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {activeSession.losses.filter(loss => loss.category === 'availability').map((loss) => (
+                {activeSession.losses.filter(loss => ['availability', 'planned_availability', 'quality'].includes(loss.category)).map((loss) => (
                   <li key={loss.id} className="p-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${
@@ -1243,7 +1253,7 @@ export default function OEEApplication() {
         {/* Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-white border-t border-slate-200 p-4 flex justify-between items-center z-40">
           <Button variant="ghost">Guardar Borrador</Button>
-          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Registra la hora de inicio y fin'}>
+          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Registra la hora de inicio, fin y producción real'}>
             <CheckCircle size={20} /> Finalizar y Enviar a Revisión
           </Button>
         </div>
