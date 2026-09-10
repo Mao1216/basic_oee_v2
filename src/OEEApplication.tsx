@@ -56,14 +56,37 @@ const addMinutesToTime = (time, minutesToAdd) => {
 
 const calculateDowntimeMetrics = (session) => {
   const operationMinutes = elapsedMinutes(session?.processStart, session?.processEnd);
+  const plannedLosses = (session?.losses || []).filter(loss => loss.category === 'planned_availability');
   const unplannedLosses = (session?.losses || []).filter(loss => loss.category === 'availability');
+  const plannedDowntimeMinutes = plannedLosses.reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
   const downtimeMinutes = unplannedLosses.reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
-  const productiveMinutes = Math.max(0, operationMinutes - downtimeMinutes);
+  const plannedProductionMinutes = Math.max(0, operationMinutes - plannedDowntimeMinutes);
+  const productiveMinutes = Math.max(0, plannedProductionMinutes - downtimeMinutes);
+  const standardSpeed = Math.max(0, Number(session?.standardSpeed || 0));
+  const totalUnits = Math.max(0, Number(session?.realQty || 0));
+  const goodUnits = Math.max(0, Number(session?.goodQty ?? (totalUnits - Number(session?.rejectQty || 0))));
+  const theoreticalUnits = productiveMinutes * standardSpeed;
+  const availability = plannedProductionMinutes > 0 ? (productiveMinutes / plannedProductionMinutes) * 100 : 0;
+  const performance = theoreticalUnits > 0 ? (totalUnits / theoreticalUnits) * 100 : 0;
+  const quality = totalUnits > 0 ? (Math.min(goodUnits, totalUnits) / totalUnits) * 100 : 0;
+  const boundedAvailability = Math.max(0, Math.min(100, availability));
+  const boundedPerformance = Math.max(0, Math.min(100, performance));
+  const boundedQuality = Math.max(0, Math.min(100, quality));
+  const oee = (boundedAvailability / 100) * (boundedPerformance / 100) * (boundedQuality / 100) * 100;
   return {
     operationMinutes,
+    plannedDowntimeMinutes,
+    plannedProductionMinutes,
     downtimeMinutes,
     productiveMinutes,
-    availability: operationMinutes > 0 ? (productiveMinutes / operationMinutes) * 100 : 0,
+    standardSpeed,
+    totalUnits,
+    goodUnits,
+    theoreticalUnits,
+    availability: boundedAvailability,
+    performance,
+    quality: boundedQuality,
+    oee,
     incidents: unplannedLosses.length
   };
 };
@@ -232,7 +255,7 @@ const RecordDetails = ({ record }: { record: any; metrics?: any; readOnly?: bool
   const metrics = calculateDowntimeMetrics(record);
   const losses = (record.losses || []).filter(loss => ['availability', 'planned_availability', 'quality'].includes(loss.category));
   const tickets = losses.filter(loss => loss.ticketCode || loss.ticket);
-  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Lote</p><p className="font-bold">{record.lot || 'Sin lote'}</p></div><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Equipo</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || record.registrar || 'Sin registrador'}</p></div></div><div className="grid gap-2 sm:grid-cols-4">{[['Tiempo operación',metrics.operationMinutes,' min'],['Det. no planificadas',metrics.downtimeMinutes,' min'],['Disponibilidad',metrics.availability,'%'],['Incidencias',metrics.incidents,'']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(unit === '%' ? 2 : 0)}{unit}</p></div>)}</div><div><h4 className="mb-2 font-bold text-slate-800">Registros de la OT</h4>{losses.length ? <div className="space-y-2">{losses.map(loss => <div key={loss.id} className={`rounded-lg border p-3 text-sm ${loss.category === 'planned_availability' ? 'border-sky-200 bg-sky-50' : loss.category === 'quality' ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}><div className="flex justify-between gap-3"><p className="font-bold text-slate-900">{loss.category === 'quality' ? 'Producción real' : loss.cause}</p><p className="font-bold">{loss.category === 'quality' ? `${Number(loss.goodQty || 0).toLocaleString()} und buenas` : `${Number(loss.duration || 0)} min`}</p></div><p className="mt-1 text-slate-600">{loss.comment || 'Sin comentario'}</p>{loss.supportOperators?.length > 0 && <p className="mt-1 text-xs font-medium text-sky-700">Apoyo: {loss.supportOperators.map(operator => `${operator.name} (${operator.hours} h)`).join(', ')}</p>}</div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Sin registros.</p>}</div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p></div>)}</div></div>}</div>;
+  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Lote</p><p className="font-bold">{record.lot || 'Sin lote'}</p></div><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Equipo</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || record.registrar || 'Sin registrador'}</p></div></div><div className="grid gap-2 sm:grid-cols-4">{[['Tiempo operación',metrics.operationMinutes,' min'],['Det. no planificadas',metrics.downtimeMinutes,' min'],['Disponibilidad',metrics.availability,'%'],['OEE',metrics.oee,'%']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(unit === '%' ? 2 : 0)}{unit}</p></div>)}</div><div><h4 className="mb-2 font-bold text-slate-800">Registros de la OT</h4>{losses.length ? <div className="space-y-2">{losses.map(loss => <div key={loss.id} className={`rounded-lg border p-3 text-sm ${loss.category === 'planned_availability' ? 'border-sky-200 bg-sky-50' : loss.category === 'quality' ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}><div className="flex justify-between gap-3"><p className="font-bold text-slate-900">{loss.category === 'quality' ? 'Producción real' : loss.cause}</p><p className="font-bold">{loss.category === 'quality' ? `${Number(loss.goodQty || 0).toLocaleString()} und buenas` : `${Number(loss.duration || 0)} min`}</p></div><p className="mt-1 text-slate-600">{loss.comment || 'Sin comentario'}</p>{loss.supportOperators?.length > 0 && <p className="mt-1 text-xs font-medium text-sky-700">Apoyo: {loss.supportOperators.map(operator => `${operator.name} (${operator.hours} h)`).join(', ')}</p>}</div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Sin registros.</p>}</div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p></div>)}</div></div>}</div>;
 };
 
 export default function OEEApplication() {
@@ -444,42 +467,31 @@ export default function OEEApplication() {
   // Helper to calculate active session OEE
   const calculateSessionMetrics = (session) => {
     if (!session) return { a: 0, p: 0, q: 0, oee: 0 };
+    const baseMetrics = calculateDowntimeMetrics(session);
     const losses = Array.isArray(session.losses) ? session.losses : [];
-    const processMinutes = elapsedMinutes(session.processStart, session.processEnd);
-    const plannedExclusions = losses.filter(loss => loss.category === 'planned_availability').reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
-    const plannedTimeMin = Math.max(0, processMinutes - plannedExclusions);
-    const availLoss = losses.filter(loss => loss.category === 'availability').reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
     const perfLoss = losses.filter(loss => loss.category === 'performance').reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
-    const operatingTime = Math.max(0, plannedTimeMin - availLoss);
-    const availability = plannedTimeMin > 0 ? (operatingTime / plannedTimeMin) * 100 : 0;
-    const standardSpeed = Number(session.standardSpeed) || 0;
     const plannedQuantity = Number(session.plannedQty ?? session.plannedQuantity ?? 0);
-    const theoreticalPlannedMinutes = standardSpeed > 0 ? plannedQuantity / standardSpeed : 0;
-    const registeredStoppageMinutes = plannedExclusions + availLoss;
-    const tni = Math.max(0, theoreticalPlannedMinutes - (processMinutes + registeredStoppageMinutes));
-    const theoreticalProduction = operatingTime * standardSpeed;
-    const reportedSpeed = operatingTime > 0 ? Number(session.realQty || 0) / operatingTime : 0;
+    const theoreticalPlannedMinutes = baseMetrics.standardSpeed > 0 ? plannedQuantity / baseMetrics.standardSpeed : 0;
+    const registeredStoppageMinutes = baseMetrics.plannedDowntimeMinutes + baseMetrics.downtimeMinutes;
+    const tni = Math.max(0, theoreticalPlannedMinutes - (baseMetrics.operationMinutes + registeredStoppageMinutes));
+    const reportedSpeed = baseMetrics.productiveMinutes > 0 ? baseMetrics.totalUnits / baseMetrics.productiveMinutes : 0;
     const effectiveSpeed = reportedSpeed;
-    const performance = theoreticalProduction > 0 ? (Number(session.realQty || 0) / theoreticalProduction) * 100 : 0;
-    const goodQty = Math.max(0, Number(session.realQty) - Number(session.rejectQty || 0));
-    const quality = session.realQty > 0 ? (goodQty / session.realQty) * 100 : 0;
-    const oee = (availability/100) * (performance/100) * (quality/100) * 100;
 
     return {
-      a: Math.max(0, Math.min(100, availability)),
-      p: Math.max(0, performance),
-      q: Math.max(0, Math.min(100, quality)),
-      oee: Math.max(0, Math.min(100, oee)),
-      operatingTime,
-      availLoss,
+      a: baseMetrics.availability,
+      p: baseMetrics.performance,
+      q: baseMetrics.quality,
+      oee: baseMetrics.oee,
+      operatingTime: baseMetrics.productiveMinutes,
+      availLoss: baseMetrics.downtimeMinutes,
       microStopMinutes: perfLoss,
-      standardSpeed,
+      standardSpeed: baseMetrics.standardSpeed,
       reportedSpeed,
       effectiveSpeed,
-      processMinutes,
-      plannedTimeMin,
-      theoreticalProduction,
-      plannedExclusions,
+      processMinutes: baseMetrics.operationMinutes,
+      plannedTimeMin: baseMetrics.plannedProductionMinutes,
+      theoreticalProduction: baseMetrics.theoreticalUnits,
+      plannedExclusions: baseMetrics.plannedDowntimeMinutes,
       theoreticalPlannedMinutes,
       registeredStoppageMinutes,
       tni
@@ -637,10 +649,16 @@ export default function OEEApplication() {
     const filteredRecords = allRecords.filter(record => (!dashboardLot || record.lot === dashboardLot) && (!dashboardOrder || (record.workOrderId || record.id) === dashboardOrder));
     const metrics = filteredRecords.map(record => ({ record, ...calculateDowntimeMetrics(record) }));
     const operationMinutes = metrics.reduce((sum, item) => sum + item.operationMinutes, 0);
+    const plannedProductionMinutes = metrics.reduce((sum, item) => sum + item.plannedProductionMinutes, 0);
     const downtimeMinutes = metrics.reduce((sum, item) => sum + item.downtimeMinutes, 0);
-    const productiveMinutes = Math.max(0, operationMinutes - downtimeMinutes);
-    const availability = operationMinutes > 0 ? productiveMinutes / operationMinutes * 100 : 0;
-    const incidents = metrics.reduce((sum, item) => sum + item.incidents, 0);
+    const productiveMinutes = metrics.reduce((sum, item) => sum + item.productiveMinutes, 0);
+    const availability = plannedProductionMinutes > 0 ? productiveMinutes / plannedProductionMinutes * 100 : 0;
+    const totalUnits = metrics.reduce((sum, item) => sum + item.totalUnits, 0);
+    const goodUnits = metrics.reduce((sum, item) => sum + item.goodUnits, 0);
+    const theoreticalUnits = metrics.reduce((sum, item) => sum + item.theoreticalUnits, 0);
+    const performance = theoreticalUnits > 0 ? Math.min(100, totalUnits / theoreticalUnits * 100) : 0;
+    const quality = totalUnits > 0 ? Math.min(100, goodUnits / totalUnits * 100) : 0;
+    const consolidatedOee = Math.max(0, Math.min(100, availability)) / 100 * performance / 100 * quality / 100 * 100;
     const causeMap = filteredRecords.flatMap(record => (record.losses || []).filter(loss => loss.category === 'availability')).reduce((summary, loss) => {
       summary[loss.cause] = (summary[loss.cause] || 0) + Number(loss.duration || 0);
       return summary;
@@ -661,9 +679,9 @@ export default function OEEApplication() {
 
     return <div className="space-y-6 animate-in fade-in duration-300">
       <div className="overflow-hidden rounded-2xl bg-gradient-to-r from-slate-950 via-blue-950 to-blue-700 p-7 text-white shadow-xl"><div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-200">Centro de control · Basic OEE v2</p><h2 className="mt-3 text-4xl font-bold">Detenciones no planificadas</h2><p className="mt-2 text-blue-100">Seguimiento de paradas, disponibilidad y causas por lote y OT.</p></div><div className="grid gap-3 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-semibold text-blue-100">Lote</label><select className="min-w-52 rounded-lg border border-white/20 bg-white p-3 text-slate-900" value={dashboardLot} onChange={event => { setDashboardLot(event.target.value); setDashboardOrder(''); }}><option value="">Todos los lotes</option>{lots.map(lot => <option key={lot}>{lot}</option>)}</select></div><div><label className="mb-1 block text-xs font-semibold text-blue-100">OT</label><select className="min-w-52 rounded-lg border border-white/20 bg-white p-3 text-slate-900 disabled:opacity-60" value={dashboardOrder} disabled={!dashboardLot} onChange={event => setDashboardOrder(event.target.value)}><option value="">Todas las OT</option>{orders.map(order => <option key={order}>{order}</option>)}</select></div></div></div></div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-5"><p className="text-sm text-slate-500">Tiempo de operación</p><p className="mt-1 text-3xl font-bold text-slate-900">{operationMinutes.toFixed(0)} min</p></Card><Card className="border-l-4 border-l-rose-500 p-5"><p className="text-sm text-slate-500">Detención no planificada</p><p className="mt-1 text-3xl font-bold text-rose-600">{downtimeMinutes.toFixed(0)} min</p></Card><Card className="border-l-4 border-l-emerald-500 p-5"><p className="text-sm text-slate-500">Disponibilidad</p><p className="mt-1 text-3xl font-bold text-emerald-600">{availability.toFixed(2)}%</p></Card><Card className="border-l-4 border-l-amber-500 p-5"><p className="text-sm text-slate-500">Incidencias registradas</p><p className="mt-1 text-3xl font-bold text-amber-600">{incidents}</p></Card></div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-5"><p className="text-sm text-slate-500">Tiempo de operación</p><p className="mt-1 text-3xl font-bold text-slate-900">{operationMinutes.toFixed(0)} min</p></Card><Card className="border-l-4 border-l-rose-500 p-5"><p className="text-sm text-slate-500">Detención no planificada</p><p className="mt-1 text-3xl font-bold text-rose-600">{downtimeMinutes.toFixed(0)} min</p></Card><Card className="border-l-4 border-l-emerald-500 p-5"><p className="text-sm text-slate-500">Disponibilidad</p><p className="mt-1 text-3xl font-bold text-emerald-600">{availability.toFixed(2)}%</p></Card><Card className="border-l-4 border-l-amber-500 p-5"><p className="text-sm text-slate-500">OEE</p><p className="mt-1 text-3xl font-bold" style={{color: getOEEColor(consolidatedOee)}}>{consolidatedOee.toFixed(2)}%</p></Card></div>
       <div className="grid gap-6 xl:grid-cols-2"><Card className="p-6"><h3 className="text-lg font-bold text-slate-900">Pareto de detenciones</h3><p className="mb-5 text-sm text-slate-500">Causas ordenadas de mayor a menor por minutos perdidos.</p><div className="h-80">{pareto.length ? <ResponsiveContainer><ComposedChart data={pareto} margin={{top:10,right:10,bottom:65,left:0}}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="cause" interval={0} angle={-30} textAnchor="end" height={85}/><YAxis yAxisId="minutes"/><YAxis yAxisId="percentage" orientation="right" domain={[0,100]} tickFormatter={value => `${value}%`}/><RechartsTooltip/><Bar yAxisId="minutes" dataKey="minutes" name="Minutos" fill="#f43f5e" radius={[6,6,0,0]}/><Line yAxisId="percentage" dataKey="cumulative" name="Acumulado" stroke="#0f172a" strokeWidth={3}/></ComposedChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-slate-400">Sin detenciones para los filtros seleccionados.</div>}</div></Card><Card className="p-6"><h3 className="text-lg font-bold text-slate-900">Pérdida por equipo</h3><p className="mb-5 text-sm text-slate-500">Minutos de detención acumulados.</p><div className="h-80">{machines.length ? <ResponsiveContainer><BarChart data={machines} layout="vertical" margin={{left:30}}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number"/><YAxis type="category" dataKey="machine" width={120}/><RechartsTooltip/><Bar dataKey="minutes" name="Minutos" fill="#2563eb" radius={[0,6,6,0]}/></BarChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-slate-400">Sin información registrada.</div>}</div></Card></div>
-      <Card><div className="border-b border-slate-200 p-5"><h3 className="text-lg font-bold text-slate-900">Resumen por OT</h3></div><div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-4">Lote</th><th className="p-4">OT</th><th className="p-4">Equipo</th><th className="p-4 text-right">Operación</th><th className="p-4 text-right">Detenciones</th><th className="p-4 text-right">Disponibilidad</th></tr></thead><tbody className="divide-y divide-slate-100">{metrics.map(({record,...item}) => <tr key={record.id}><td className="p-4 font-medium">{record.lot || '-'}</td><td className="p-4">{record.workOrderId || record.id}</td><td className="p-4">{record.machine}</td><td className="p-4 text-right">{item.operationMinutes.toFixed(0)} min</td><td className="p-4 text-right font-bold text-rose-600">{item.downtimeMinutes.toFixed(0)} min</td><td className="p-4 text-right font-bold">{item.availability.toFixed(2)}%</td></tr>)}{!metrics.length && <tr><td colSpan={6} className="p-8 text-center text-slate-500">No hay registros para mostrar.</td></tr>}</tbody></table></div></Card>
+      <Card><div className="border-b border-slate-200 p-5"><h3 className="text-lg font-bold text-slate-900">Resumen por OT</h3></div><div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-4">Lote</th><th className="p-4">OT</th><th className="p-4">Equipo</th><th className="p-4 text-right">Operación</th><th className="p-4 text-right">Detenciones</th><th className="p-4 text-right">Disponibilidad</th><th className="p-4 text-right">OEE</th></tr></thead><tbody className="divide-y divide-slate-100">{metrics.map(({record,...item}) => <tr key={record.id}><td className="p-4 font-medium">{record.lot || '-'}</td><td className="p-4">{record.workOrderId || record.id}</td><td className="p-4">{record.machine}</td><td className="p-4 text-right">{item.operationMinutes.toFixed(0)} min</td><td className="p-4 text-right font-bold text-rose-600">{item.downtimeMinutes.toFixed(0)} min</td><td className="p-4 text-right font-bold">{item.availability.toFixed(2)}%</td><td className="p-4 text-right font-bold" style={{color: getOEEColor(item.oee)}}>{item.oee.toFixed(2)}%</td></tr>)}{!metrics.length && <tr><td colSpan={7} className="p-8 text-center text-slate-500">No hay registros para mostrar.</td></tr>}</tbody></table></div></Card>
     </div>;
   };
 
@@ -1197,7 +1215,7 @@ export default function OEEApplication() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-4"><p className="text-sm font-medium text-slate-600">Tiempo de operación</p><h3 className="text-2xl font-bold text-slate-900">{downtimeMetrics.operationMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-rose-500 p-4"><p className="text-sm font-medium text-slate-600">Detención acumulada</p><h3 className="text-2xl font-bold text-rose-600">{downtimeMetrics.downtimeMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-emerald-500 p-4"><p className="text-sm font-medium text-slate-600">Disponibilidad</p><h3 className="text-2xl font-bold text-emerald-600">{downtimeMetrics.availability.toFixed(2)}%</h3></Card><Card className="border-l-4 border-l-amber-500 p-4"><p className="text-sm font-medium text-slate-600">Incidencias</p><h3 className="text-2xl font-bold text-amber-600">{downtimeMetrics.incidents}</h3></Card></div>
+        <div className="grid gap-4 md:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-4"><p className="text-sm font-medium text-slate-600">Tiempo de operación</p><h3 className="text-2xl font-bold text-slate-900">{downtimeMetrics.operationMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-rose-500 p-4"><p className="text-sm font-medium text-slate-600">Detención acumulada</p><h3 className="text-2xl font-bold text-rose-600">{downtimeMetrics.downtimeMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-emerald-500 p-4"><p className="text-sm font-medium text-slate-600">Disponibilidad</p><h3 className="text-2xl font-bold text-emerald-600">{downtimeMetrics.availability.toFixed(2)}%</h3></Card><Card className="border-l-4 border-l-amber-500 p-4"><p className="text-sm font-medium text-slate-600">OEE</p><h3 className="text-2xl font-bold" style={{color: getOEEColor(downtimeMetrics.oee)}}>{downtimeMetrics.oee.toFixed(2)}%</h3></Card></div>
 
         <div className="mt-8 mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-800">Registros de la OT</h3><p className="text-sm text-slate-500">Registra producción real y los eventos de disponibilidad ocurridos durante el proceso.</p></div><Button variant="secondary" className="!py-2" onClick={openSupportModal}><Users size={18}/> Personal de apoyo ({activeSession.supportOperators.length})</Button></div>
         <div className="grid gap-3 md:grid-cols-3">
