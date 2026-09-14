@@ -22,7 +22,7 @@ export const bioeeRepository = {
     const client = requireSupabase();
     const { data, error } = await client
       .from('work_orders')
-      .select('*, lots(code), equipment(name, standard_speed, production_lines(name)), profiles!work_orders_registrar_id_fkey(full_name)')
+      .select('*, lots(code), equipment(name, production_lines(name)), profiles!work_orders_registrar_id_fkey(full_name)')
       .order('created_at', { ascending: false });
     if (error) throw error;
     return data ?? [];
@@ -53,4 +53,3 @@ export const bioeeRepository = {
     return () => { void client.removeChannel(channel); };
   }
 };
-
