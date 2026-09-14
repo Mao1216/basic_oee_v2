@@ -1,4 +1,4 @@
-# Basic OEE v2
+# BIOEE B
 
 Versión simplificada de BIOEE para registrar y analizar exclusivamente detenciones no planificadas por lote, orden de trabajo y equipo.
 
