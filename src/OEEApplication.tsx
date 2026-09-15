@@ -909,7 +909,18 @@ export default function OEEApplication() {
     ));
     const requiresMaintenanceTicket = lossForm.cause === 'Avería mecánica' || lossForm.cause === 'Avería eléctrica';
     const updateProcessTime = (field, value) => {
-      setActiveSession(current => current ? { ...current, [field]: value } : current);
+      setActiveSession(current => {
+        if (!current) return current;
+        const nextSession = { ...current, [field]: value };
+        if (!nextSession.productionRegistered || Number(nextSession.machineSpeed) <= 0) return nextSession;
+        const totalDowntime = nextSession.losses
+          .filter(loss => loss.category === 'planned_availability' || loss.category === 'availability')
+          .reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
+        return {
+          ...nextSession,
+          realQty: Math.max(0, Math.round(Number(nextSession.machineSpeed) * Math.max(0, elapsedMinutes(nextSession.processStart, nextSession.processEnd) - totalDowntime)))
+        };
+      });
     };
 
     const openSupportModal = () => {
