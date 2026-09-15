@@ -7,7 +7,7 @@ import {
   LayoutDashboard, ClipboardList, CheckSquare, Activity, History, Bot, Settings,
   LogOut, Bell, User, Play, Pause, AlertTriangle, AlertOctagon, Wrench, CheckCircle,
   ChevronRight, ArrowRight, Save, Send, Edit, X, Plus, Search, Filter, MessageSquare, Upload, Users,
-  Eye, Download, Scale, PackageMinus, PackageCheck, Trash2
+  Eye, Download, Scale, PackageMinus, PackageCheck, Trash2, Timer
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from './lib/supabase';
@@ -52,6 +52,21 @@ const addMinutesToTime = (time, minutesToAdd) => {
   const base = timeToMinutes(time || '00:00');
   const total = (base + minutesToAdd) % (24 * 60);
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+};
+
+const MetricGauge = ({ value, color }) => {
+  const percentage = Math.max(0, Math.min(100, Number(value) || 0));
+  const angle = Math.PI + (Math.PI * percentage / 100);
+  const needleX = 50 + 30 * Math.cos(angle);
+  const needleY = 45 + 30 * Math.sin(angle);
+  return (
+    <svg viewBox="0 0 100 58" className="h-14 w-24" role="img" aria-label={`${percentage.toFixed(2)} por ciento`}>
+      <path d="M10 45 A40 40 0 0 1 90 45" fill="none" stroke="#e2e8f0" strokeWidth="11" strokeLinecap="butt" pathLength="100" />
+      <path d="M10 45 A40 40 0 0 1 90 45" fill="none" stroke={color} strokeWidth="11" strokeLinecap="butt" pathLength="100" strokeDasharray={`${percentage} 100`} />
+      <line x1="50" y1="45" x2={needleX} y2={needleY} stroke="#334155" strokeWidth="4" strokeLinecap="round" />
+      <circle cx="50" cy="45" r="5" fill="#334155" />
+    </svg>
+  );
 };
 
 const calculateDowntimeMetrics = (session) => {
@@ -1151,7 +1166,12 @@ export default function OEEApplication() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4"><Card className="border-l-4 border-l-blue-500 p-4"><p className="text-sm font-medium text-slate-600">Tiempo de operación</p><h3 className="text-2xl font-bold text-slate-900">{downtimeMetrics.operationMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-rose-500 p-4"><p className="text-sm font-medium text-slate-600">Detención acumulada</p><h3 className="text-2xl font-bold text-rose-600">{downtimeMetrics.downtimeMinutes.toFixed(0)} min</h3></Card><Card className="border-l-4 border-l-emerald-500 p-4"><p className="text-sm font-medium text-slate-600">Disponibilidad</p><h3 className="text-2xl font-bold text-emerald-600">{downtimeMetrics.availability.toFixed(2)}%</h3></Card><Card className="border-l-4 border-l-amber-500 p-4"><p className="text-sm font-medium text-slate-600">OEE</p><h3 className="text-2xl font-bold" style={{color: getOEEColor(downtimeMetrics.oee)}}>{downtimeMetrics.oee.toFixed(2)}%</h3></Card></div>
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card className="border-l-4 border-l-blue-500 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">Tiempo de operación</p><h3 className="text-2xl font-bold text-slate-900">{downtimeMetrics.operationMinutes.toFixed(0)} min</h3></div><Timer className="shrink-0 text-slate-500" size={48} strokeWidth={1.8}/></div></Card>
+          <Card className="border-l-4 border-l-rose-500 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">Detención acumulada</p><h3 className="text-2xl font-bold text-rose-600">{(downtimeMetrics.plannedDowntimeMinutes + downtimeMetrics.downtimeMinutes).toFixed(0)} min</h3></div><Pause className="shrink-0 text-rose-500" size={48} strokeWidth={2.2}/></div></Card>
+          <Card className="border-l-4 p-4" style={{borderLeftColor:getOEEColor(downtimeMetrics.availability)}}><div className="flex items-center justify-between gap-2"><div><p className="text-sm font-medium text-slate-600">Disponibilidad</p><h3 className="text-2xl font-bold" style={{color:getOEEColor(downtimeMetrics.availability)}}>{downtimeMetrics.availability.toFixed(2)}%</h3></div><MetricGauge value={downtimeMetrics.availability} color={getOEEColor(downtimeMetrics.availability)}/></div></Card>
+          <Card className="border-l-4 p-4" style={{borderLeftColor:getOEEColor(downtimeMetrics.oee)}}><div className="flex items-center justify-between gap-2"><div><p className="text-sm font-medium text-slate-600">OEE</p><h3 className="text-2xl font-bold" style={{color:getOEEColor(downtimeMetrics.oee)}}>{downtimeMetrics.oee.toFixed(2)}%</h3></div><MetricGauge value={downtimeMetrics.oee} color={getOEEColor(downtimeMetrics.oee)}/></div></Card>
+        </div>
 
         <div className="mt-8 mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-800">Registros de la OT</h3><p className="text-sm text-slate-500">Registra producción real y los eventos de disponibilidad ocurridos durante el proceso.</p></div><Button variant="secondary" className="!py-2" onClick={openSupportModal}><Users size={18}/> Personal de apoyo ({Number(activeSession.supportPersonnelCount || 0)})</Button></div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
