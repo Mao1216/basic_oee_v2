@@ -63,9 +63,11 @@ const calculateDowntimeMetrics = (session) => {
   const plannedProductionMinutes = Math.max(0, operationMinutes - plannedDowntimeMinutes);
   const productiveMinutes = Math.max(0, plannedProductionMinutes - downtimeMinutes);
   const machineSpeed = Math.max(0, Number(session?.machineSpeed || 0));
-  const totalUnits = Math.max(0, Number(session?.realQty || 0));
-  const goodUnits = Math.max(0, Number(session?.goodQty ?? (totalUnits - Number(session?.rejectQty || 0))));
   const theoreticalUnits = productiveMinutes * machineSpeed;
+  const totalUnits = session?.productionRegistered && machineSpeed > 0
+    ? Math.max(0, Math.round(theoreticalUnits))
+    : Math.max(0, Number(session?.realQty || 0));
+  const goodUnits = Math.max(0, Number(session?.goodQty ?? (totalUnits - Number(session?.rejectQty || 0))));
   const availability = plannedProductionMinutes > 0 ? (productiveMinutes / plannedProductionMinutes) * 100 : 0;
   const performance = theoreticalUnits > 0 ? (totalUnits / theoreticalUnits) * 100 : 0;
   const quality = totalUnits > 0 ? (Math.min(goodUnits, totalUnits) / totalUnits) * 100 : 0;
@@ -887,7 +889,7 @@ export default function OEEApplication() {
     const [supportModalOpen, setSupportModalOpen] = useState(false);
     const [supportCountDraft, setSupportCountDraft] = useState('0');
     const [overweightModalOpen, setOverweightModalOpen] = useState(false);
-    const [overweightDraft, setOverweightDraft] = useState([{ sampleSize: '', weights: [''], time: '' }]);
+    const [overweightDraft, setOverweightDraft] = useState([{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
     const [targetWeight, setTargetWeight] = useState('');
     const [materialModalOpen, setMaterialModalOpen] = useState(false);
     const [materialForm, setMaterialForm] = useState({ type: 'Envasado', reason: '', code: '', description: '', quantity: '', unit: 'unidades' });
@@ -897,6 +899,14 @@ export default function OEEApplication() {
     const metrics = calculateSessionMetrics(activeSession);
     const downtimeMetrics = calculateDowntimeMetrics(activeSession);
     const mandatoryReady = Boolean(activeSession.processStart && activeSession.processEnd && activeSession.productionRegistered);
+    const productionRealPreview = Math.max(0, Math.round(
+      (Number(lossForm.machineSpeed) || 0) * Math.max(0,
+        elapsedMinutes(activeSession.processStart, activeSession.processEnd) -
+        activeSession.losses
+          .filter(loss => loss.category === 'planned_availability' || loss.category === 'availability')
+          .reduce((sum, loss) => sum + Number(loss.duration || 0), 0)
+      )
+    ));
     const requiresMaintenanceTicket = lossForm.cause === 'Avería mecánica' || lossForm.cause === 'Avería eléctrica';
     const updateProcessTime = (field, value) => {
       setActiveSession(current => current ? { ...current, [field]: value } : current);
@@ -915,6 +925,15 @@ export default function OEEApplication() {
       const reprocessQty = qualityLosses.reduce((sum, loss) => sum + Number(loss.reprocessQty || 0), 0);
       const wasteQty = qualityLosses.reduce((sum, loss) => sum + Number(loss.wasteQty || 0), 0);
       const rejectQty = reprocessQty + wasteQty;
+      const totalDowntime = normalizedLosses
+        .filter(loss => loss.category === 'planned_availability' || loss.category === 'availability')
+        .reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
+      const calculatedRealQty = session.productionRegistered && Number(session.machineSpeed) > 0
+        ? Math.max(0, Math.round(Number(session.machineSpeed) * Math.max(0, elapsedMinutes(session.processStart, session.processEnd) - totalDowntime)))
+        : Math.max(0, Number(session.realQty || 0));
+      const registeredGoodQty = qualityLosses.length
+        ? qualityLosses.reduce((sum, loss) => sum + Number(loss.goodQty || 0), 0)
+        : Math.max(0, calculatedRealQty - rejectQty);
       return {
         ...session,
         losses: normalizedLosses,
@@ -922,7 +941,8 @@ export default function OEEApplication() {
         reprocessQty,
         wasteQty,
         rejectQty,
-        goodQty: Math.max(0, Number(session.realQty || 0) - rejectQty)
+        realQty: calculatedRealQty,
+        goodQty: registeredGoodQty
       };
     };
 
@@ -999,7 +1019,7 @@ export default function OEEApplication() {
         ? activeSession.losses.map(loss => loss.id === editingLossId ? { ...newLoss, id: editingLossId, time: loss.time } : loss)
         : [...activeSession.losses, newLoss];
       const nextSession = lossType === 'quality'
-        ? { ...activeSession, realQty: Number(newLoss.goodQty) + Number(newLoss.reprocessQty) + Number(newLoss.wasteQty), machineSpeed: Number(newLoss.machineSpeed) || 0, productionRegistered: true }
+        ? { ...activeSession, realQty: productionRealPreview, machineSpeed: Number(newLoss.machineSpeed) || 0, productionRegistered: true }
         : activeSession;
       setActiveSession(normalizeLosses(nextSession, nextLosses));
       
@@ -1030,26 +1050,30 @@ export default function OEEApplication() {
 
     const openOverweightModal = () => {
       setTargetWeight(String(activeSession.targetWeight || ''));
-      setOverweightDraft([{ sampleSize: '', weights: [''], time: defaultOverweightTime(0) }]);
+      setOverweightDraft([{ sampleSize: '', weights: [''], time: defaultOverweightTime(0), measuredBy: 'PD' }]);
       setOverweightModalOpen(true);
     };
 
     const addOverweightSample = () => {
-      setOverweightDraft(current => [...current, { sampleSize: '', weights: [''], time: defaultOverweightTime(current.length) }]);
+      setOverweightDraft(current => [...current, { sampleSize: '', weights: [''], time: defaultOverweightTime(current.length), measuredBy: 'PD' }]);
     };
 
     const updateSampleTime = (sampleIndex, value) => {
       setOverweightDraft(current => current.map((sample, index) => index === sampleIndex ? { ...sample, time: value } : sample));
     };
 
+    const updateSampleMeasuredBy = (sampleIndex, value) => {
+      setOverweightDraft(current => current.map((sample, index) => index === sampleIndex ? { ...sample, measuredBy: value } : sample));
+    };
+
     const validOverweightSamples = overweightDraft.length > 0 && overweightDraft.every(sample => sample.time && Number(sample.sampleSize) > 0 && sample.weights.length === Number(sample.sampleSize) && sample.weights.every(weight => Number(weight) > 0));
 
     const saveOverweights = () => {
       if (!validOverweightSamples) return;
-      const validRows = overweightDraft.flatMap((sample, sampleIndex) => sample.weights.map((weight, weightIndex) => ({ id: Date.now() + Math.random(), sampleId: `M-${Date.now()}-${sampleIndex + 1}`, sampleSize: Number(sample.sampleSize), measurement: weightIndex + 1, weight: Number(weight), quantity: 1, time: sample.time })));
+      const validRows = overweightDraft.flatMap((sample, sampleIndex) => sample.weights.map((weight, weightIndex) => ({ id: Date.now() + Math.random(), sampleId: `M-${Date.now()}-${sampleIndex + 1}`, sampleSize: Number(sample.sampleSize), measurement: weightIndex + 1, weight: Number(weight), quantity: 1, time: sample.time, measuredBy: sample.measuredBy })));
       if (!validRows.length) return;
       setActiveSession(current => ({ ...current, targetWeight: Number(targetWeight) || current.targetWeight, overweights: [...(current.overweights || []), ...validRows] }));
-      setOverweightDraft([{ sampleSize: '', weights: [''], time: '' }]);
+      setOverweightDraft([{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
       setOverweightModalOpen(false);
     };
 
@@ -1226,8 +1250,9 @@ export default function OEEApplication() {
             {lossType === 'quality' && (
               <div className="space-y-4">
                 <div><label className="block text-sm font-semibold text-slate-800 mb-1">Velocidad de máquina (und/min)</label><input type="number" min="0.01" step="0.01" className="w-full rounded-lg border border-purple-300 p-3 text-lg font-semibold" value={lossForm.machineSpeed} onChange={(e) => setLossForm({...lossForm, machineSpeed: e.target.value})} placeholder="Ingresa la velocidad registrada"/></div>
-                <div><label className="block text-sm font-semibold text-slate-800 mb-1">Registra tus unidades buenas</label><input type="number" min="0" className="w-full rounded-lg border border-emerald-300 p-3 text-lg font-semibold" value={lossForm.goodQty} onChange={(e) => setLossForm({...lossForm, goodQty: e.target.value})} placeholder={`Planificado: ${activeSession.plannedQty}`}/></div>
-                {Number(lossForm.goodQty) < Number(activeSession.plannedQty) && lossForm.goodQty !== '' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="font-semibold text-amber-900">Las unidades que se esperaban eran {Number(activeSession.plannedQty).toLocaleString()}; sustenta las {(Number(activeSession.plannedQty) - Number(lossForm.goodQty)).toLocaleString()} faltantes.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="block text-sm font-medium text-amber-800 mb-1">A reproceso (und)</label><input type="number" min="0" className="w-full rounded-lg border border-amber-300 p-3 text-lg" value={lossForm.reprocessQty} onChange={(e) => setLossForm({...lossForm, reprocessQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">Puede volver a fabricarse.</p></div><div><label className="block text-sm font-medium text-rose-800 mb-1">A desperdicio (und)</label><input type="number" min="0" className="w-full rounded-lg border border-rose-300 p-3 text-lg" value={lossForm.wasteQty} onChange={(e) => setLossForm({...lossForm, wasteQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">No puede reprocesarse.</p></div></div><p className="mt-2 text-xs text-amber-800">Sustento registrado: {(Number(lossForm.reprocessQty) + Number(lossForm.wasteQty)).toLocaleString()} de {(Number(activeSession.plannedQty) - Number(lossForm.goodQty)).toLocaleString()} unidades.</p></div>}
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4"><p className="text-sm font-semibold text-blue-900">Producción real calculada</p><p className="mt-1 text-3xl font-bold text-blue-700">{productionRealPreview.toLocaleString()} und</p><p className="mt-1 text-xs text-blue-700">Velocidad × (tiempo entre inicio y fin − detenciones planificadas − detenciones no planificadas).</p></div>
+                <div><label className="block text-sm font-semibold text-slate-800 mb-1">Registra tus unidades buenas</label><input type="number" min="0" max={productionRealPreview} className="w-full rounded-lg border border-emerald-300 p-3 text-lg font-semibold" value={lossForm.goodQty} onChange={(e) => setLossForm({...lossForm, goodQty: e.target.value})} placeholder={`Máximo calculado: ${productionRealPreview}`}/></div>
+                {Number(lossForm.goodQty) < productionRealPreview && lossForm.goodQty !== '' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="font-semibold text-amber-900">La producción real calculada es {productionRealPreview.toLocaleString()} unidades; sustenta las {(productionRealPreview - Number(lossForm.goodQty)).toLocaleString()} unidades no buenas.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="block text-sm font-medium text-amber-800 mb-1">A reproceso (und)</label><input type="number" min="0" className="w-full rounded-lg border border-amber-300 p-3 text-lg" value={lossForm.reprocessQty} onChange={(e) => setLossForm({...lossForm, reprocessQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">Puede volver a fabricarse.</p></div><div><label className="block text-sm font-medium text-rose-800 mb-1">A desperdicio (und)</label><input type="number" min="0" className="w-full rounded-lg border border-rose-300 p-3 text-lg" value={lossForm.wasteQty} onChange={(e) => setLossForm({...lossForm, wasteQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">No puede reprocesarse.</p></div></div><p className="mt-2 text-xs text-amber-800">Sustento registrado: {(Number(lossForm.reprocessQty) + Number(lossForm.wasteQty)).toLocaleString()} de {(productionRealPreview - Number(lossForm.goodQty)).toLocaleString()} unidades.</p></div>}
               </div>
             )}
 
@@ -1263,7 +1288,7 @@ export default function OEEApplication() {
 
             <Button 
               className="w-full !mt-6 !py-4 text-lg" 
-              disabled={(lossType !== 'quality' && !lossForm.cause) || ((lossType === 'availability' || lossType === 'planned_availability') && ((Number(lossForm.durationHours) || 0) * 60 + (Number(lossForm.durationMinutes) || 0) <= 0)) || (lossType === 'performance' && !lossForm.comment.trim()) || (lossType === 'quality' && (!Number(lossForm.machineSpeed) || lossForm.goodQty === '' || (Number(lossForm.goodQty) < Number(activeSession.plannedQty) && Number(lossForm.reprocessQty) + Number(lossForm.wasteQty) !== Number(activeSession.plannedQty) - Number(lossForm.goodQty)))) || (requiresMaintenanceTicket && !maintenanceTicket)}
+              disabled={(lossType !== 'quality' && !lossForm.cause) || ((lossType === 'availability' || lossType === 'planned_availability') && ((Number(lossForm.durationHours) || 0) * 60 + (Number(lossForm.durationMinutes) || 0) <= 0)) || (lossType === 'performance' && !lossForm.comment.trim()) || (lossType === 'quality' && (!Number(lossForm.machineSpeed) || productionRealPreview <= 0 || lossForm.goodQty === '' || Number(lossForm.goodQty) > productionRealPreview || (Number(lossForm.goodQty) < productionRealPreview && Number(lossForm.reprocessQty) + Number(lossForm.wasteQty) !== productionRealPreview - Number(lossForm.goodQty)))) || (requiresMaintenanceTicket && !maintenanceTicket)}
               onClick={handleAddLoss}
             >
               {editingLossId ? 'Guardar cambios' : 'Registrar evento'}
@@ -1305,6 +1330,7 @@ export default function OEEApplication() {
             <div className="rounded-lg bg-cyan-50 p-3"><label className="text-sm font-semibold text-cyan-900">Peso objetivo / línea central (g)</label><input type="number" min="0" step="0.01" className="mt-1 w-full rounded border border-cyan-200 p-2" value={targetWeight} onChange={(event) => setTargetWeight(event.target.value)} placeholder="Ej. 250"/></div>
             {overweightDraft.map((sample, sampleIndex) => <div key={sampleIndex} className="space-y-3 rounded-lg border border-slate-200 p-4">
               <div className="grid gap-3 sm:grid-cols-[1fr_160px_auto]"><div><label className="text-sm font-semibold text-slate-700">Cantidad muestreada</label><input type="number" min="1" max="100" className="mt-1 w-full rounded border border-slate-300 p-2" value={sample.sampleSize} onChange={(event) => updateSampleSize(sampleIndex, event.target.value)} placeholder="Ej. 5"/></div><TimeField label="Hora del muestreo" value={sample.time} onChange={(value) => updateSampleTime(sampleIndex, value)}/><button aria-label={`Eliminar muestreo ${sampleIndex + 1}`} disabled={overweightDraft.length === 1} onClick={() => setOverweightDraft(current => current.filter((_, index) => index !== sampleIndex))} className="self-end rounded p-2 text-rose-600 disabled:opacity-30"><Trash2 size={18}/></button></div>
+              <div><p className="mb-2 text-sm font-semibold text-slate-700">Responsable de la medición</p><div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-1">{[['PD','Producción'],['CC','Control de calidad']].map(([value,label]) => <button key={value} type="button" onClick={() => updateSampleMeasuredBy(sampleIndex, value)} className={`rounded-md px-3 py-2 text-sm font-semibold transition ${sample.measuredBy === value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>{value} · {label}</button>)}</div></div>
               {sample.weights.length > 0 && Number(sample.sampleSize) > 0 && <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{sample.weights.map((weight, weightIndex) => <div key={weightIndex}><label className="text-xs font-semibold text-slate-500">Peso {weightIndex + 1} (g)</label><input type="number" min="0" step="0.01" className="mt-1 w-full rounded border border-slate-300 p-2" value={weight} onChange={(event) => updateSampleWeight(sampleIndex, weightIndex, event.target.value)}/></div>)}</div>}
             </div>)}
             <Button variant="secondary" className="w-full" onClick={addOverweightSample}><Plus size={18}/> Agregar otro muestreo</Button>
