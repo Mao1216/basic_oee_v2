@@ -355,6 +355,7 @@ export default function OEEApplication() {
   
   // Active Operator Session State
   const [activeSession, setActiveSession] = useState(() => loadStoredCatalog('bioee-active-session', null));
+  const [sessionDrafts, setSessionDrafts] = useState(() => loadStoredCatalog('bioee-session-drafts', {}));
 
   const currentUser = role === 'responsible_operator'
     ? (productionLineOperators.find(operator => operator.id === loginOperatorId) || APP_PROFILES.responsible_operator)
@@ -375,6 +376,9 @@ export default function OEEApplication() {
       setLossCauses(normalizeLossCauses(sharedData.lossCauses));
     }
     if (Array.isArray(sharedData.productStandards) && sharedData.productStandards.length) setProductStandards(sharedData.productStandards);
+    if (sharedData.sessionDrafts && typeof sharedData.sessionDrafts === 'object') {
+      setSessionDrafts(current => ({ ...sharedData.sessionDrafts, ...current }));
+    }
     setActiveSession(current => {
       if (current) return current;
       if (sharedData.activeSession?.id && sharedData.activeSession.id !== closedSessionId.current) return sharedData.activeSession;
@@ -386,7 +390,7 @@ export default function OEEApplication() {
   useEffect(() => {
     if (!supabase) return;
     let mounted = true;
-    const initialData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession };
+    const initialData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession, sessionDrafts };
     const connectSharedState = async () => {
       const { data, error } = await supabase.from('bioee_shared_state').select('data').eq('id', 'main').maybeSingle();
       if (!mounted) return;
@@ -427,12 +431,12 @@ export default function OEEApplication() {
   useEffect(() => {
     if (!supabase || !remoteSyncReady || applyingRemoteState.current) return;
     const timer = window.setTimeout(async () => {
-      const sharedData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession };
+      const sharedData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession, sessionDrafts };
       const { error } = await supabase.from('bioee_shared_state').upsert({ id: 'main', data: sharedData, updated_at: new Date().toISOString() });
       setRemoteSyncStatus(error ? 'No se pudo sincronizar' : 'Datos compartidos sincronizados');
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession, remoteSyncReady]);
+  }, [records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession, sessionDrafts, remoteSyncReady]);
 
   useEffect(() => { window.localStorage.setItem('bioee-production-line-operators', JSON.stringify(productionLineOperators)); }, [productionLineOperators]);
   useEffect(() => { window.localStorage.setItem('bioee-plant-equipment-v2', JSON.stringify(plantEquipment)); }, [plantEquipment]);
@@ -440,8 +444,12 @@ export default function OEEApplication() {
   useEffect(() => { window.localStorage.setItem('bioee-product-standards', JSON.stringify(productStandards)); }, [productStandards]);
   useEffect(() => { window.localStorage.setItem('bioee-work-orders', JSON.stringify(workOrders)); }, [workOrders]);
   useEffect(() => { window.localStorage.setItem('bioee-records', JSON.stringify(records)); }, [records]);
+  useEffect(() => { window.localStorage.setItem('bioee-session-drafts', JSON.stringify(sessionDrafts)); }, [sessionDrafts]);
   useEffect(() => {
-    if (activeSession) window.localStorage.setItem('bioee-active-session', JSON.stringify(activeSession));
+    if (activeSession) {
+      window.localStorage.setItem('bioee-active-session', JSON.stringify(activeSession));
+      setSessionDrafts(current => ({ ...current, [activeSession.id]: activeSession }));
+    }
     else window.localStorage.removeItem('bioee-active-session');
   }, [activeSession]);
 
@@ -452,6 +460,7 @@ export default function OEEApplication() {
   };
 
   const logout = () => {
+    if (activeSession?.id) setSessionDrafts(current => ({ ...current, [activeSession.id]: activeSession }));
     setIsLoggedIn(false);
     setRole(null);
   };
@@ -937,6 +946,7 @@ export default function OEEApplication() {
                            closedSessionId.current = '';
                            setActiveSession(current => {
                              if (current?.id === ot.id) return current;
+                             if (sessionDrafts[ot.id]) return sessionDrafts[ot.id];
                              const standard = findProductStandard(ot.product, productStandards);
                              return {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, machineSpeed: 0, productionRegistered: false, losses: [], supportPersonnelCount: 0, overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: standard?.target ?? ot.targetWeight ?? '', measurementUnit: standard?.unit || 'g', liquidMeasurement: Boolean(standard?.liquid), assistantMessages: [], processStart: '00:00', processEnd: '00:00', performanceEndTime: ''};
                            });
@@ -958,21 +968,32 @@ export default function OEEApplication() {
   };
 
   const ActiveProductionView = () => {
-    const [lossModalOpen, setLossModalOpen] = useState(false);
-    const [lossType, setLossType] = useState('availability'); // availability, performance, quality
-    const [lossForm, setLossForm] = useState({ cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
-    const [editingLossId, setEditingLossId] = useState(null);
+    const persistedUiDrafts = activeSession?.uiDrafts || {};
+    const [lossModalOpen, setLossModalOpen] = useState(() => Boolean(persistedUiDrafts.lossModalOpen));
+    const [lossType, setLossType] = useState(() => persistedUiDrafts.lossType || 'availability'); // availability, performance, quality
+    const [lossForm, setLossForm] = useState(() => persistedUiDrafts.lossForm || { cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
+    const [editingLossId, setEditingLossId] = useState(() => persistedUiDrafts.editingLossId || null);
     
-    const [ticketModalOpen, setTicketModalOpen] = useState(false);
-    const [maintenanceTicket, setMaintenanceTicket] = useState(null);
-    const [ticketForm, setTicketForm] = useState({ priority: 'Media', detail: '', reportedBy: DUMMY_USER.name });
-    const [supportModalOpen, setSupportModalOpen] = useState(false);
-    const [supportCountDraft, setSupportCountDraft] = useState('0');
-    const [overweightModalOpen, setOverweightModalOpen] = useState(false);
-    const [overweightDraft, setOverweightDraft] = useState([{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
-    const [targetWeight, setTargetWeight] = useState('');
-    const [materialModalOpen, setMaterialModalOpen] = useState(false);
-    const [materialForm, setMaterialForm] = useState({ type: 'Envasado', reason: '', code: '', description: '', quantity: '', unit: 'unidades' });
+    const [ticketModalOpen, setTicketModalOpen] = useState(() => Boolean(persistedUiDrafts.ticketModalOpen));
+    const [maintenanceTicket, setMaintenanceTicket] = useState(() => persistedUiDrafts.maintenanceTicket || null);
+    const [ticketForm, setTicketForm] = useState(() => persistedUiDrafts.ticketForm || { priority: 'Media', detail: '', reportedBy: DUMMY_USER.name });
+    const [supportModalOpen, setSupportModalOpen] = useState(() => Boolean(persistedUiDrafts.supportModalOpen));
+    const [supportCountDraft, setSupportCountDraft] = useState(() => persistedUiDrafts.supportCountDraft || '0');
+    const [overweightModalOpen, setOverweightModalOpen] = useState(() => Boolean(persistedUiDrafts.overweightModalOpen));
+    const [overweightDraft, setOverweightDraft] = useState(() => persistedUiDrafts.overweightDraft || [{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
+    const [targetWeight, setTargetWeight] = useState(() => persistedUiDrafts.targetWeight || '');
+    const [materialModalOpen, setMaterialModalOpen] = useState(() => Boolean(persistedUiDrafts.materialModalOpen));
+    const [materialForm, setMaterialForm] = useState(() => persistedUiDrafts.materialForm || { type: 'Envasado', reason: '', code: '', description: '', quantity: '', unit: 'unidades' });
+
+    useEffect(() => {
+      if (!activeSession?.id) return;
+      const uiDrafts = { lossModalOpen, lossForm, lossType, editingLossId, ticketModalOpen, maintenanceTicket, ticketForm, supportModalOpen, supportCountDraft, overweightModalOpen, overweightDraft, targetWeight, materialModalOpen, materialForm };
+      setActiveSession(current => {
+        if (!current) return current;
+        if (JSON.stringify(current.uiDrafts || {}) === JSON.stringify(uiDrafts)) return current;
+        return { ...current, uiDrafts };
+      });
+    }, [lossModalOpen, lossForm, lossType, editingLossId, ticketModalOpen, maintenanceTicket, ticketForm, supportModalOpen, supportCountDraft, overweightModalOpen, overweightDraft, targetWeight, materialModalOpen, materialForm]);
 
     if (!activeSession) return <div>No hay sesión activa.</div>;
 
@@ -1219,6 +1240,11 @@ export default function OEEApplication() {
       };
       setRecords([...records, recordToSave]);
       setWorkOrders(current => current.map(order => order.id === activeSession.id ? { ...order, status: 'review' } : order));
+      setSessionDrafts(current => {
+        const next = { ...current };
+        delete next[activeSession.id];
+        return next;
+      });
       closedSessionId.current = activeSession.id;
       setActiveSession(null);
       setCurrentView('work_orders');
