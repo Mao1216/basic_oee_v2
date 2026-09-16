@@ -361,6 +361,15 @@ export default function OEEApplication() {
     ? (productionLineOperators.find(operator => operator.id === loginOperatorId) || APP_PROFILES.responsible_operator)
     : role ? APP_PROFILES[role] : null;
 
+  useEffect(() => {
+    const stopAccidentalNumberWheel = (event) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement && target.type === 'number' && document.activeElement === target) target.blur();
+    };
+    document.addEventListener('wheel', stopAccidentalNumberWheel, { passive: true });
+    return () => document.removeEventListener('wheel', stopAccidentalNumberWheel);
+  }, []);
+
   const applySharedState = (sharedData) => {
     if (!sharedData || typeof sharedData !== 'object') return;
     applyingRemoteState.current = true;
@@ -994,7 +1003,12 @@ export default function OEEApplication() {
     const [supportCountDraft, setSupportCountDraft] = useState(() => persistedUiDrafts.supportCountDraft || '0');
     const [overweightModalOpen, setOverweightModalOpen] = useState(() => Boolean(persistedUiDrafts.overweightModalOpen));
     const [overweightDraft, setOverweightDraft] = useState(() => persistedUiDrafts.overweightDraft || [{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
-    const [overweightHistoryModalOpen, setOverweightHistoryModalOpen] = useState(false);
+    const spHistoryReopenKey = activeSession?.id ? `bioee-reopen-sp-history-${activeSession.id}` : '';
+    const [overweightHistoryModalOpen, setOverweightHistoryModalOpen] = useState(() => {
+      const shouldReopen = Boolean(spHistoryReopenKey && window.sessionStorage.getItem(spHistoryReopenKey) === '1');
+      if (shouldReopen) window.sessionStorage.removeItem(spHistoryReopenKey);
+      return shouldReopen;
+    });
     const [editingOverweightSampleId, setEditingOverweightSampleId] = useState(null);
     const [targetWeight, setTargetWeight] = useState(() => persistedUiDrafts.targetWeight || '');
     const [materialModalOpen, setMaterialModalOpen] = useState(() => Boolean(persistedUiDrafts.materialModalOpen));
@@ -1231,7 +1245,7 @@ export default function OEEApplication() {
 
     const validOverweightSamples = overweightDraft.length > 0 && overweightDraft.every(sample => sample.time && Number(sample.sampleSize) > 0 && sample.weights.length === Number(sample.sampleSize) && sample.weights.every(weight => Number(weight) > 0));
     const showQualityHistory = overweightDraft.some(sample => sample.measuredBy === 'CC');
-    const overweightHistory = (activeSession.overweights || []).map(item => ({ ...item, time: String(item.time || '').slice(0, 5) })).filter(item => item.time && Number(item.weight) > 0);
+    const overweightHistory = (activeSession.overweights || []).map(item => ({ ...item, time: String(item.time || '').slice(0, 5) })).filter(item => item.time && Number(item.weight) > 0).sort((first, second) => timeToMinutes(first.time) - timeToMinutes(second.time));
     const overweightHistoryTimes = Array.from(new Set(overweightHistory.map(item => String(item.time)))) as string[];
     overweightHistoryTimes.sort();
     const overweightAverages = overweightHistoryTimes.map(time => {
@@ -1263,6 +1277,7 @@ export default function OEEApplication() {
 
     const saveOverweights = () => {
       if (!validOverweightSamples) return;
+      const returnToHistory = Boolean(editingOverweightSampleId);
       const saveTimestamp = Date.now();
       const validRows = overweightDraft.flatMap((sample, sampleIndex) => {
         const sampleId = editingOverweightSampleId || `M-${saveTimestamp}-${sampleIndex + 1}`;
@@ -1270,6 +1285,7 @@ export default function OEEApplication() {
       });
       if (!validRows.length) return;
       if (uiDraftStorageKey) window.localStorage.removeItem(uiDraftStorageKey);
+      if (returnToHistory && spHistoryReopenKey) window.sessionStorage.setItem(spHistoryReopenKey, '1');
       setOverweightModalOpen(false);
       setActiveSession(current => {
         const previousRows = editingOverweightSampleId
