@@ -982,6 +982,7 @@ export default function OEEApplication() {
     const uiDraftStorageKey = activeSession?.id ? `bioee-ui-draft-${activeSession.id}` : '';
     const persistedUiDrafts = uiDraftStorageKey ? loadStoredCatalog(uiDraftStorageKey, activeSession?.uiDrafts || {}) : {};
     const [lossModalOpen, setLossModalOpen] = useState(() => Boolean(persistedUiDrafts.lossModalOpen));
+    const [lossValidationMessage, setLossValidationMessage] = useState('');
     const [lossType, setLossType] = useState(() => persistedUiDrafts.lossType || 'availability'); // availability, performance, quality
     const [lossForm, setLossForm] = useState(() => persistedUiDrafts.lossForm || { cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
     const [editingLossId, setEditingLossId] = useState(() => persistedUiDrafts.editingLossId || null);
@@ -1080,11 +1081,13 @@ export default function OEEApplication() {
 
     const openNewLoss = (category) => {
       resetLossEditor();
+      setLossValidationMessage('');
       setLossType(category);
       setLossModalOpen(true);
     };
 
     const openEditLoss = (loss) => {
+      setLossValidationMessage('');
       setEditingLossId(loss.id);
       setLossType(loss.category);
       setLossForm({
@@ -1121,6 +1124,38 @@ export default function OEEApplication() {
 
     const handleAddLoss = () => {
       const selectedDuration = (Number(lossForm.durationHours) || 0) * 60 + (Number(lossForm.durationMinutes) || 0);
+      if (lossType !== 'quality' && !lossForm.cause) {
+        setLossValidationMessage('Selecciona una causa antes de guardar la detención.');
+        return;
+      }
+      if ((lossType === 'availability' || lossType === 'planned_availability') && selectedDuration <= 0) {
+        setLossValidationMessage('Selecciona una duración mayor a 0 minutos.');
+        return;
+      }
+      if (lossType === 'performance' && !lossForm.comment.trim()) {
+        setLossValidationMessage('Describe brevemente lo ocurrido durante el proceso.');
+        return;
+      }
+      if (requiresMaintenanceTicket && !maintenanceTicket) {
+        setLossValidationMessage('Genera el ticket de mantenimiento antes de guardar esta avería.');
+        return;
+      }
+      if (lossType === 'quality') {
+        if (!Number(lossForm.machineSpeed) || productionRealPreview <= 0) {
+          setLossValidationMessage('Ingresa una velocidad de máquina válida para calcular la producción real.');
+          return;
+        }
+        if (lossForm.goodQty === '' || Number(lossForm.goodQty) > productionRealPreview) {
+          setLossValidationMessage('Ingresa una cantidad válida de productos buenos.');
+          return;
+        }
+        const missingUnits = productionRealPreview - Number(lossForm.goodQty);
+        if (missingUnits > 0 && Number(lossForm.reprocessQty) + Number(lossForm.wasteQty) !== missingUnits) {
+          setLossValidationMessage(`Sustenta las ${missingUnits.toLocaleString()} unidades faltantes entre reproceso y desperdicio.`);
+          return;
+        }
+      }
+      setLossValidationMessage('');
       const newLoss = {
         id: Date.now(),
         category: lossType,
@@ -1146,10 +1181,10 @@ export default function OEEApplication() {
       const nextSession = lossType === 'quality'
         ? { ...activeSession, realQty: productionRealPreview, machineSpeed: Number(newLoss.machineSpeed) || 0, productionRegistered: true }
         : activeSession;
-      setActiveSession(normalizeLosses(nextSession, nextLosses));
-      
+      if (uiDraftStorageKey) window.localStorage.removeItem(uiDraftStorageKey);
       setLossModalOpen(false);
       resetLossEditor();
+      setActiveSession(normalizeLosses(nextSession, nextLosses));
     };
 
     const updateSampleSize = (sampleIndex, value) => {
@@ -1364,7 +1399,7 @@ export default function OEEApplication() {
           </div>
         </Modal>
 
-        <Modal isOpen={lossModalOpen} onClose={() => { setLossModalOpen(false); resetLossEditor(); }} title={`${editingLossId ? 'Editar' : 'Registrar'} ${lossType === 'planned_availability' ? 'Detención planificada - Disponibilidad' : lossType === 'availability' ? 'Detención no planificada - Disponibilidad' : lossType === 'performance' ? 'observación de velocidad de equipo' : 'producción real'}`}>
+        <Modal isOpen={lossModalOpen} onClose={() => { setLossModalOpen(false); setLossValidationMessage(''); resetLossEditor(); }} title={`${editingLossId ? 'Editar' : 'Registrar'} ${lossType === 'planned_availability' ? 'Detención planificada - Disponibilidad' : lossType === 'availability' ? 'Detención no planificada - Disponibilidad' : lossType === 'performance' ? 'observación de velocidad de equipo' : 'producción real'}`}>
           <div className="space-y-4">
             {lossType !== 'quality' && <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">{lossType === 'performance' ? 'Motivo' : 'Causa'}</label>
@@ -1440,9 +1475,14 @@ export default function OEEApplication() {
               ></textarea>
             </div>
 
+            {lossValidationMessage && (
+              <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+                {lossValidationMessage}
+              </div>
+            )}
+
             <Button 
               className="w-full !mt-6 !py-4 text-lg" 
-              disabled={(lossType !== 'quality' && !lossForm.cause) || ((lossType === 'availability' || lossType === 'planned_availability') && ((Number(lossForm.durationHours) || 0) * 60 + (Number(lossForm.durationMinutes) || 0) <= 0)) || (lossType === 'performance' && !lossForm.comment.trim()) || (lossType === 'quality' && (!Number(lossForm.machineSpeed) || productionRealPreview <= 0 || lossForm.goodQty === '' || Number(lossForm.goodQty) > productionRealPreview || (Number(lossForm.goodQty) < productionRealPreview && Number(lossForm.reprocessQty) + Number(lossForm.wasteQty) !== productionRealPreview - Number(lossForm.goodQty)))) || (requiresMaintenanceTicket && !maintenanceTicket)}
               onClick={handleAddLoss}
             >
               {editingLossId ? 'Guardar cambios' : 'Registrar evento'}
