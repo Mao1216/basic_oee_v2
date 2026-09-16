@@ -994,6 +994,8 @@ export default function OEEApplication() {
     const [supportCountDraft, setSupportCountDraft] = useState(() => persistedUiDrafts.supportCountDraft || '0');
     const [overweightModalOpen, setOverweightModalOpen] = useState(() => Boolean(persistedUiDrafts.overweightModalOpen));
     const [overweightDraft, setOverweightDraft] = useState(() => persistedUiDrafts.overweightDraft || [{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
+    const [overweightHistoryModalOpen, setOverweightHistoryModalOpen] = useState(false);
+    const [editingOverweightSampleId, setEditingOverweightSampleId] = useState(null);
     const [targetWeight, setTargetWeight] = useState(() => persistedUiDrafts.targetWeight || '');
     const [materialModalOpen, setMaterialModalOpen] = useState(() => Boolean(persistedUiDrafts.materialModalOpen));
     const [materialForm, setMaterialForm] = useState(() => persistedUiDrafts.materialForm || { type: 'Envasado', reason: '', code: '', description: '', quantity: '', unit: 'unidades' });
@@ -1209,6 +1211,7 @@ export default function OEEApplication() {
     };
 
     const openOverweightModal = () => {
+      setEditingOverweightSampleId(null);
       setTargetWeight(String(productStandard?.target ?? activeSession.targetWeight ?? ''));
       setOverweightDraft([{ sampleSize: '', weights: [''], time: defaultOverweightTime(0), measuredBy: 'PD' }]);
       setOverweightModalOpen(true);
@@ -1244,14 +1247,38 @@ export default function OEEApplication() {
     const historyZoomDomain = [Math.max(0, historyCentralValue - historyTolerance * 4), historyCentralValue + historyTolerance * 4];
     const historyOutsideZoom = overweightHistory.filter(item => Number(item.weight) < historyZoomDomain[0] || Number(item.weight) > historyZoomDomain[1]).length;
     const HistoryHourTick = ({ x = 0, y = 0, payload = { value: '' } }: any) => <g transform={`translate(${x},${y})`}><text x={0} y={12} textAnchor="middle" fill="#475569" fontSize={12}>{payload.value}</text><text x={0} y={29} textAnchor="middle" fill="#0891b2" fontSize={10} fontWeight={700}>Prom. {Number(overweightAverageByTime[payload.value] || 0).toFixed(3)}</text></g>;
+    const overweightSampleGroups: any[] = Array.from(new Set<string>((activeSession.overweights || []).map(item => String(item.sampleId || `legacy-${item.id}`)))).map(sampleId => {
+      const rows = (activeSession.overweights || []).filter(item => String(item.sampleId || `legacy-${item.id}`) === sampleId).sort((a, b) => Number(a.measurement || 0) - Number(b.measurement || 0));
+      const values = rows.map(item => Number(item.weight)).filter(value => Number.isFinite(value));
+      return { sampleId, rows, time: String(rows[0]?.time || '').slice(0, 5), measuredBy: rows[0]?.measuredBy || 'PD', values, average: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0 };
+    }).sort((a, b) => a.time.localeCompare(b.time));
+
+    const editOverweightSample = (sample) => {
+      setEditingOverweightSampleId(sample.sampleId);
+      setTargetWeight(String(productStandard?.target ?? activeSession.targetWeight ?? ''));
+      setOverweightDraft([{ sampleSize: String(sample.values.length), weights: sample.values.map(value => String(value)), time: sample.time, measuredBy: sample.measuredBy }]);
+      setOverweightHistoryModalOpen(false);
+      setOverweightModalOpen(true);
+    };
 
     const saveOverweights = () => {
       if (!validOverweightSamples) return;
-      const validRows = overweightDraft.flatMap((sample, sampleIndex) => sample.weights.map((weight, weightIndex) => ({ id: Date.now() + Math.random(), sampleId: `M-${Date.now()}-${sampleIndex + 1}`, sampleSize: Number(sample.sampleSize), measurement: weightIndex + 1, weight: Number(weight), quantity: 1, time: sample.time, measuredBy: sample.measuredBy })));
+      const saveTimestamp = Date.now();
+      const validRows = overweightDraft.flatMap((sample, sampleIndex) => {
+        const sampleId = editingOverweightSampleId || `M-${saveTimestamp}-${sampleIndex + 1}`;
+        return sample.weights.map((weight, weightIndex) => ({ id: saveTimestamp + sampleIndex * 100 + weightIndex, sampleId, sampleSize: Number(sample.sampleSize), measurement: weightIndex + 1, weight: Number(weight), quantity: 1, time: sample.time, measuredBy: sample.measuredBy }));
+      });
       if (!validRows.length) return;
-      setActiveSession(current => ({ ...current, targetWeight: Number(productStandard?.target ?? targetWeight) || current.targetWeight, measurementUnit, liquidMeasurement: isLiquidMeasurement, overweights: [...(current.overweights || []), ...validRows] }));
-      setOverweightDraft([{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
+      if (uiDraftStorageKey) window.localStorage.removeItem(uiDraftStorageKey);
       setOverweightModalOpen(false);
+      setActiveSession(current => {
+        const previousRows = editingOverweightSampleId
+          ? (current.overweights || []).filter(item => (item.sampleId || `legacy-${item.id}`) !== editingOverweightSampleId)
+          : (current.overweights || []);
+        return { ...current, targetWeight: Number(productStandard?.target ?? targetWeight) || current.targetWeight, measurementUnit, liquidMeasurement: isLiquidMeasurement, overweights: [...previousRows, ...validRows] };
+      });
+      setOverweightDraft([{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
+      setEditingOverweightSampleId(null);
     };
 
     const saveMaterialDiscard = () => {
@@ -1339,8 +1366,12 @@ export default function OEEApplication() {
         </div>
         {/* Recent Events Log */}
         <Card className="mt-8">
-          <div className="p-4 border-b border-slate-200">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
             <h3 className="font-bold text-slate-800">Eventos Registrados</h3>
+            <button type="button" onClick={() => setOverweightHistoryModalOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-800 transition hover:border-cyan-500 hover:bg-cyan-100" title="Ver y editar historial de sobrepesos">
+              <Scale size={15}/> SP
+              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-cyan-700">{overweightSampleGroups.length}</span>
+            </button>
           </div>
           <div className="p-0">
             {activeSession.losses.filter(loss => ['availability', 'planned_availability', 'quality'].includes(loss.category)).length === 0 ? (
@@ -1518,7 +1549,7 @@ export default function OEEApplication() {
           </div>
         </Modal>
 
-        <Modal wide={showQualityHistory} isOpen={overweightModalOpen} onClose={() => setOverweightModalOpen(false)} title={`Registrar ${measurementTitle.toLowerCase()}`}>
+        <Modal wide={showQualityHistory} isOpen={overweightModalOpen} onClose={() => { setOverweightModalOpen(false); setEditingOverweightSampleId(null); }} title={`${editingOverweightSampleId ? 'Editar' : 'Registrar'} ${measurementTitle.toLowerCase()}`}>
           <div className={`grid gap-6 ${showQualityHistory ? 'lg:grid-cols-2' : ''}`}>
           <div className="space-y-4">
             <p className="text-sm text-slate-600">Indica la cantidad muestreada y registra cada medición individual.</p>
@@ -1528,10 +1559,28 @@ export default function OEEApplication() {
               <div><p className="mb-2 text-sm font-semibold text-slate-700">Responsable de la medición</p><div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-1">{[['PD','Producción'],['CC','Control de calidad']].map(([value,label]) => <button key={value} type="button" onClick={() => updateSampleMeasuredBy(sampleIndex, value)} className={`rounded-md px-3 py-2 text-sm font-semibold transition ${sample.measuredBy === value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>{value} · {label}</button>)}</div></div>
               {sample.weights.length > 0 && Number(sample.sampleSize) > 0 && <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{sample.weights.map((weight, weightIndex) => <div key={weightIndex}><label className="text-xs font-semibold text-slate-500">Medición {weightIndex + 1} ({measurementUnit})</label><input type="number" min="0" step="0.01" className="mt-1 w-full rounded border border-slate-300 p-2" value={weight} onChange={(event) => updateSampleWeight(sampleIndex, weightIndex, event.target.value)}/></div>)}</div>}
             </div>)}
-            <Button variant="secondary" className="w-full" onClick={addOverweightSample}><Plus size={18}/> Agregar otro muestreo</Button>
-            <Button className="w-full" disabled={!validOverweightSamples} onClick={saveOverweights}>Guardar muestreos</Button>
+            {!editingOverweightSampleId && <Button variant="secondary" className="w-full" onClick={addOverweightSample}><Plus size={18}/> Agregar otro muestreo</Button>}
+            <Button className="w-full" disabled={!validOverweightSamples} onClick={saveOverweights}>{editingOverweightSampleId ? 'Guardar cambios' : 'Guardar muestreos'}</Button>
           </div>
           {showQualityHistory && <div className="min-w-0 rounded-xl border border-cyan-200 bg-slate-50 p-4"><h4 className="font-bold text-slate-900">Historial de esta OT</h4><p className="mb-3 text-xs text-slate-500">Línea central y tolerancias ±{historyToleranceLabel} {measurementUnit}. Cada hora agrupa únicamente las muestras tomadas en ese momento y muestra su promedio.</p>{overweightHistory.length ? <><div className="mb-2 flex flex-wrap gap-2 text-[11px] font-semibold"><span className="rounded-full bg-rose-50 px-2 py-1 text-rose-700">Inferior: {historyLowerTolerance.toFixed(3)} {measurementUnit}</span><span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">Objetivo: {historyCentralValue.toFixed(3)} {measurementUnit}</span><span className="rounded-full bg-rose-50 px-2 py-1 text-rose-700">Superior: {historyUpperTolerance.toFixed(3)} {measurementUnit}</span></div><div className="overflow-x-auto pb-3"><div style={{minWidth: `${Math.max(620, overweightHistoryTimes.length * 125)}px`}}><ScatterChart width={Math.max(620, overweightHistoryTimes.length * 125)} height={350} margin={{top:18,right:28,bottom:45,left:10}}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="time" type="category" name="Hora" allowDuplicatedCategory={false} tick={<HistoryHourTick/>} interval={0}/><YAxis dataKey="weight" type="number" domain={historyZoomDomain} allowDataOverflow name={measurementUnit} unit={` ${measurementUnit}`} tickCount={9}/><RechartsTooltip formatter={(value) => [`${Number(value).toFixed(3)} ${measurementUnit}`, 'Medición']}/><ReferenceLine y={historyUpperTolerance} stroke={COLORS.critical} strokeWidth={2} strokeDasharray="6 4" label={{value:`+${historyToleranceLabel} ${measurementUnit}`,position:'insideTopRight',fill:COLORS.critical}}/><ReferenceLine y={historyCentralValue} stroke={COLORS.primary} strokeWidth={3} label={{value:'Objetivo',position:'insideTopRight',fill:COLORS.primary}}/><ReferenceLine y={historyLowerTolerance} stroke={COLORS.critical} strokeWidth={2} strokeDasharray="6 4" label={{value:`-${historyToleranceLabel} ${measurementUnit}`,position:'insideBottomRight',fill:COLORS.critical}}/><Scatter data={overweightHistory}>{overweightHistory.map((item,index) => <Cell key={`${item.time}-${index}`} fill={Number(item.weight) >= historyLowerTolerance && Number(item.weight) <= historyUpperTolerance ? '#10b981' : '#ef4444'}/>)}</Scatter></ScatterChart></div></div>{historyOutsideZoom > 0 && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{historyOutsideZoom} medición(es) extrema(s) quedan fuera del zoom para mantener visibles las tolerancias.</p>}</> : <div className="flex h-72 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center text-sm text-slate-500">Aún no hay mediciones guardadas para esta OT.</div>}</div>}
+          </div>
+        </Modal>
+        <Modal isOpen={overweightHistoryModalOpen} onClose={() => setOverweightHistoryModalOpen(false)} title={`Historial de ${measurementTitle.toLowerCase()}`}>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
+              <p className="font-semibold">OT {activeSession.id} · {activeSession.product}</p>
+              <p className="mt-1 text-xs text-cyan-700">Selecciona el lápiz para corregir la hora, el responsable o cualquiera de las mediciones.</p>
+            </div>
+            {overweightSampleGroups.length ? <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">{overweightSampleGroups.map((sample, index) => (
+              <div key={sample.sampleId} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div><p className="font-bold text-slate-800">Muestreo {index + 1} · {sample.time || 'Sin hora'}</p><p className="mt-1 text-xs text-slate-500">{sample.measuredBy === 'CC' ? 'Control de Calidad (CC)' : 'Producción (PD)'} · {sample.values.length} medición(es)</p></div>
+                  <button type="button" onClick={() => editOverweightSample(sample)} className="rounded-lg border border-blue-200 p-2 text-blue-600 hover:bg-blue-50" title="Editar muestreo" aria-label={`Editar muestreo de las ${sample.time}`}><Edit size={16}/></button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">{sample.values.map((value, valueIndex) => <span key={valueIndex} className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{value.toFixed(3)} {measurementUnit}</span>)}</div>
+                <p className="mt-3 text-sm font-bold text-cyan-700">Promedio: {sample.average.toFixed(3)} {measurementUnit}</p>
+              </div>
+            ))}</div> : <div className="rounded-xl border border-dashed border-slate-300 py-12 text-center text-sm text-slate-500">Aún no hay registros de {measurementTitle.toLowerCase()} para esta OT.</div>}
           </div>
         </Modal>
         <Modal isOpen={materialModalOpen} onClose={() => setMaterialModalOpen(false)} title="Registrar descarte de material">
