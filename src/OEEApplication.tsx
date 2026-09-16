@@ -979,7 +979,8 @@ export default function OEEApplication() {
   };
 
   const ActiveProductionView = () => {
-    const persistedUiDrafts = activeSession?.uiDrafts || {};
+    const uiDraftStorageKey = activeSession?.id ? `bioee-ui-draft-${activeSession.id}` : '';
+    const persistedUiDrafts = uiDraftStorageKey ? loadStoredCatalog(uiDraftStorageKey, activeSession?.uiDrafts || {}) : {};
     const [lossModalOpen, setLossModalOpen] = useState(() => Boolean(persistedUiDrafts.lossModalOpen));
     const [lossType, setLossType] = useState(() => persistedUiDrafts.lossType || 'availability'); // availability, performance, quality
     const [lossForm, setLossForm] = useState(() => persistedUiDrafts.lossForm || { cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
@@ -997,13 +998,9 @@ export default function OEEApplication() {
     const [materialForm, setMaterialForm] = useState(() => persistedUiDrafts.materialForm || { type: 'Envasado', reason: '', code: '', description: '', quantity: '', unit: 'unidades' });
 
     useEffect(() => {
-      if (!activeSession?.id) return;
+      if (!uiDraftStorageKey) return;
       const uiDrafts = { lossModalOpen, lossForm, lossType, editingLossId, ticketModalOpen, maintenanceTicket, ticketForm, supportModalOpen, supportCountDraft, overweightModalOpen, overweightDraft, targetWeight, materialModalOpen, materialForm };
-      setActiveSession(current => {
-        if (!current) return current;
-        if (JSON.stringify(current.uiDrafts || {}) === JSON.stringify(uiDrafts)) return current;
-        return { ...current, uiDrafts };
-      });
+      window.localStorage.setItem(uiDraftStorageKey, JSON.stringify(uiDrafts));
     }, [lossModalOpen, lossForm, lossType, editingLossId, ticketModalOpen, maintenanceTicket, ticketForm, supportModalOpen, supportCountDraft, overweightModalOpen, overweightDraft, targetWeight, materialModalOpen, materialForm]);
 
     if (!activeSession) return <div>No hay sesión activa.</div>;
@@ -1209,7 +1206,7 @@ export default function OEEApplication() {
     const historyToleranceLabel = historyTolerance.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
     const historyLowerTolerance = historyCentralValue - historyTolerance;
     const historyUpperTolerance = historyCentralValue + historyTolerance;
-    const historyZoomDomain = [Math.max(0, historyLowerTolerance - historyTolerance * 0.5), historyUpperTolerance + historyTolerance * 0.5];
+    const historyZoomDomain = [Math.max(0, historyCentralValue - historyTolerance * 4), historyCentralValue + historyTolerance * 4];
     const historyOutsideZoom = overweightHistory.filter(item => Number(item.weight) < historyZoomDomain[0] || Number(item.weight) > historyZoomDomain[1]).length;
     const HistoryHourTick = ({ x = 0, y = 0, payload = { value: '' } }: any) => <g transform={`translate(${x},${y})`}><text x={0} y={12} textAnchor="middle" fill="#475569" fontSize={12}>{payload.value}</text><text x={0} y={29} textAnchor="middle" fill="#0891b2" fontSize={10} fontWeight={700}>Prom. {Number(overweightAverageByTime[payload.value] || 0).toFixed(3)}</text></g>;
 
@@ -1256,6 +1253,7 @@ export default function OEEApplication() {
         delete next[activeSession.id];
         return next;
       });
+      window.localStorage.removeItem(`bioee-ui-draft-${activeSession.id}`);
       closedSessionId.current = activeSession.id;
       setActiveSession(null);
       setCurrentView('work_orders');
