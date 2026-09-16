@@ -129,6 +129,45 @@ const APP_PROFILES = {
   responsible_operator: { name: "Josue Huapaya", id: "OP-B01-003", machines: ["*"] }
 };
 
+const PRODUCT_MEASUREMENT_STANDARDS = [
+  { product: 'Proteggo', target: 100, unit: 'g', liquid: false },
+  { product: 'Rivolta', target: 0.75, unit: 'ml', liquid: true },
+  { product: 'Imperia', target: 100, unit: 'g', liquid: false },
+  { product: 'Complejo B', target: 10, unit: 'g', liquid: false }
+];
+
+const normalizeText = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const findProductStandard = (product, standards = PRODUCT_MEASUREMENT_STANDARDS) => {
+  const normalizedProduct = normalizeText(product);
+  return standards.find(item => normalizedProduct.includes(normalizeText(item.product)) || normalizeText(item.product).includes(normalizedProduct));
+};
+
+const ASSISTANT_KNOWLEDGE = [
+  { keywords: ['bloqueo aguas abajo', 'maquina posterior', 'equipo posterior'], answer: 'Clasifícalo como detención no planificada por bloqueo aguas abajo cuando el equipo debe parar porque la siguiente etapa no puede recibir el producto. Registra qué equipo posterior originó la restricción, la hora, la duración y si hubo acumulación o riesgo para el producto.' },
+  { keywords: ['bloqueo aguas arriba', 'maquina anterior', 'equipo anterior'], answer: 'Clasifícalo como detención no planificada por bloqueo aguas arriba cuando el equipo queda sin alimentación porque una etapa anterior dejó de entregar producto. Identifica el equipo de origen, registra la hora y duración, y describe cómo se restableció el flujo.' },
+  { keywords: ['desabastecimiento', 'sin materia prima', 'falta de materia prima', 'falta de insumo', 'material de envase', 'material de empaque'], answer: 'El desabastecimiento ocurre cuando la operación no puede continuar por falta de materia prima, material de envase o material de empaque. Registra el insumo faltante, la cantidad o entrega pendiente, el área que confirmó la reposición y el tiempo total perdido.' },
+  { keywords: ['falta de personal', 'ausencia de personal', 'sin operario'], answer: 'Registra falta de personal cuando el equipo estuvo disponible, pero no pudo operar por ausencia o dotación insuficiente. Indica el puesto requerido, el periodo afectado y si se aplicó reemplazo o redistribución del equipo humano.' },
+  { keywords: ['formato', 'cambio de formato', 'setup'], answer: 'El cambio de formato es una detención planificada para adaptar el equipo a una nueva presentación, producto o lote. Registra la duración real, la hora de inicio, la cantidad de personas que apoyaron, el formato instalado y las verificaciones realizadas antes de liberar el equipo.' },
+  { keywords: ['limpieza general', 'limpieza profunda'], answer: 'La limpieza general es una intervención planificada de mayor alcance para sanear equipos y áreas conforme al programa establecido. Registra duración, alcance, personal participante y la confirmación de que el equipo quedó apto para reiniciar.' },
+  { keywords: ['limpieza rutinaria', 'limpieza diaria'], answer: 'La limpieza rutinaria es la actividad periódica necesaria para conservar el puesto y el equipo en condiciones operativas. Registra el tiempo efectivamente utilizado y cualquier condición que haya prolongado la actividad normal.' },
+  { keywords: ['limpieza', 'limpieza programada'], answer: 'La limpieza programada es una detención planificada destinada a asegurar condiciones higiénicas y prevenir contaminación cruzada. Registra el tipo de limpieza, la duración, el personal de apoyo y la verificación o liberación previa al reinicio.' },
+  { keywords: ['mantenimiento programado', 'mantenimiento preventivo', 'preventivo'], answer: 'El mantenimiento programado es una intervención coordinada con anticipación para conservar la confiabilidad del equipo. Registra la actividad ejecutada, componente atendido, duración, responsable y condición del equipo después de la prueba de funcionamiento.' },
+  { keywords: ['arranque de linea', 'inicio de linea', 'puesta en marcha'], answer: 'El arranque de línea es el tiempo planificado necesario para preparar el equipo y alcanzar condiciones estables de operación al inicio de la jornada o campaña. Registra las verificaciones realizadas, la hora en que comenzó y cuándo quedó habilitada la producción.' },
+  { keywords: ['ajuste de equipo', 'ajustes de equipos', 'regulacion del equipo'], answer: 'Un ajuste de equipo es una intervención planificada para configurar parámetros, guías o componentes antes de producir dentro de especificación. Registra qué parámetro se ajustó, el motivo, la duración y el resultado de la verificación.' },
+  { keywords: ['averia mecanica', 'falla mecanica', 'fallo mecanico'], answer: 'Una avería mecánica es una detención no planificada causada por desgaste, rotura, desalineación o movimiento anormal de un componente físico. Registra el síntoma, el componente afectado, la hora y duración, y genera el ticket de mantenimiento con la acción aplicada.' },
+  { keywords: ['averia electrica', 'falla electrica', 'fallo electrico', 'electronico'], answer: 'Una avería eléctrica o electrónica es una detención no planificada vinculada con alimentación, motores, sensores, cableado, tarjetas o control. Registra alarmas y síntomas, la hora y duración, el componente identificado y el ticket de mantenimiento.' },
+  { keywords: ['suministro electrico', 'corte de energia', 'sin energia'], answer: 'Registra corte de suministro eléctrico cuando una interrupción externa o interna de energía impide operar el equipo. Indica el área afectada, hora de corte y reposición, duración y la validación realizada antes de reiniciar.' },
+  { keywords: ['suministro de agua', 'corte de agua', 'sin agua'], answer: 'Registra corte de suministro de agua cuando la falta de este servicio detiene o impide iniciar el proceso. Indica el punto de uso afectado, hora de corte y retorno, duración y verificación sanitaria u operativa previa al reinicio.' },
+  { keywords: ['corte de servicio', 'servicios'], answer: 'El corte de servicios es una detención no planificada causada por la pérdida de una utilidad necesaria, como energía, agua o aire comprimido. Identifica el servicio, alcance, hora de inicio y recuperación, y la comprobación efectuada antes de reanudar.' },
+  { keywords: ['desgaste', 'marcha lenta por desgaste'], answer: 'Clasifícalo como pérdida de velocidad por desgaste cuando el equipo continúa produciendo, pero no alcanza su cadencia esperada debido al deterioro de un componente. Registra el síntoma, componente probable, periodo afectado y ticket o acción de mantenimiento.' },
+  { keywords: ['ajuste suboptimo', 'mala configuracion', 'configuracion incorrecta'], answer: 'Un ajuste subóptimo reduce la velocidad porque parámetros, guías o condiciones del equipo no quedaron configurados correctamente. Registra el parámetro observado, periodo afectado, corrección aplicada y resultado después del ajuste.' },
+  { keywords: ['operacion por debajo del estandar', 'debajo del estandar', 'caida de cadencia', 'marcha lenta'], answer: 'Registra pérdida de velocidad cuando el equipo opera de forma continua, pero por debajo de la cadencia esperada. Identifica la restricción del proceso, el intervalo afectado, la velocidad observada y la acción realizada para recuperar el ritmo.' },
+  { keywords: ['merma de operacion', 'mermas', 'producto defectuoso', 'rechazo', 'defecto'], answer: 'Una merma de operación es producto que no cumple las especificaciones por condiciones del proceso, parámetros fuera de rango o una ejecución incorrecta. Registra cantidad, defecto observado, etapa donde se detectó y destino del material: reproceso o desperdicio.' },
+  { keywords: ['descarte por estabilizacion', 'estabilizacion', 'arranque con descarte'], answer: 'El descarte por estabilización corresponde a unidades generadas mientras el equipo alcanza parámetros estables de operación. Registra cantidad, intervalo de arranque, parámetro que se estabilizó y el criterio usado para iniciar la producción conforme.' },
+  { keywords: ['bloqueo', 'atasco'], answer: 'Un bloqueo o atasco es una detención no planificada por obstrucción del flujo de material o producto dentro del equipo. Registra el punto exacto, material involucrado, hora y duración, además de la acción usada para restablecer el proceso.' },
+  { keywords: ['sobrepeso', 'sobre peso', 'sobremedida', 'sobre medida'], answer: 'El control compara cada medición con el objetivo definido para el producto. En líquidos se denomina “Sobre medidas”. Selecciona Producción (PD) o Control de Calidad (CC), registra la hora y todas las lecturas de la muestra; la gráfica permitirá revisar dispersión y promedios por hora.' }
+];
+
 const WORK_ORDER_STATUS: Record<string, { label: string; variant: BadgeVariant }> = {
   not_started: { label: 'Sin iniciar', variant: 'default' },
   in_progress: { label: 'En proceso', variant: 'success' },
@@ -224,11 +263,11 @@ const Button = ({ children, variant = 'primary', className = '', type = 'button'
   );
 };
 
-const Modal = ({ isOpen, onClose, title, children }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode }) => {
+const Modal = ({ isOpen, onClose, title, children, wide = false }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; wide?: boolean }) => {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+      <div className={`bg-white rounded-xl shadow-xl w-full ${wide ? 'max-w-6xl' : 'max-w-lg'} overflow-hidden flex flex-col max-h-[90vh]`}>
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
           <h3 className="text-lg font-bold text-slate-800">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
@@ -286,6 +325,7 @@ export default function OEEApplication() {
     const stored = loadStoredCatalog('bioee-loss-causes', LOSS_CAUSES);
     return normalizeLossCauses(stored);
   });
+  const [productStandards, setProductStandards] = useState(() => loadStoredCatalog('bioee-product-standards', PRODUCT_MEASUREMENT_STANDARDS));
   const [adminSection, setAdminSection] = useState('');
   const [adminPlantSection, setAdminPlantSection] = useState('');
   const [adminLossCategory, setAdminLossCategory] = useState('availability');
@@ -331,6 +371,7 @@ export default function OEEApplication() {
     if (sharedData.lossCauses && typeof sharedData.lossCauses === 'object' && Object.keys(sharedData.lossCauses).length) {
       setLossCauses(normalizeLossCauses(sharedData.lossCauses));
     }
+    if (Array.isArray(sharedData.productStandards) && sharedData.productStandards.length) setProductStandards(sharedData.productStandards);
     setActiveSession(sharedData.activeSession || null);
     window.setTimeout(() => { applyingRemoteState.current = false; }, 0);
   };
@@ -338,7 +379,7 @@ export default function OEEApplication() {
   useEffect(() => {
     if (!supabase) return;
     let mounted = true;
-    const initialData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, activeSession };
+    const initialData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession };
     const connectSharedState = async () => {
       const { data, error } = await supabase.from('bioee_shared_state').select('data').eq('id', 'main').maybeSingle();
       if (!mounted) return;
@@ -379,16 +420,17 @@ export default function OEEApplication() {
   useEffect(() => {
     if (!supabase || !remoteSyncReady || applyingRemoteState.current) return;
     const timer = window.setTimeout(async () => {
-      const sharedData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, activeSession };
+      const sharedData = { records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession };
       const { error } = await supabase.from('bioee_shared_state').upsert({ id: 'main', data: sharedData, updated_at: new Date().toISOString() });
       setRemoteSyncStatus(error ? 'No se pudo sincronizar' : 'Datos compartidos sincronizados');
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [records, workOrders, productionLineOperators, plantEquipment, lossCauses, activeSession, remoteSyncReady]);
+  }, [records, workOrders, productionLineOperators, plantEquipment, lossCauses, productStandards, activeSession, remoteSyncReady]);
 
   useEffect(() => { window.localStorage.setItem('bioee-production-line-operators', JSON.stringify(productionLineOperators)); }, [productionLineOperators]);
   useEffect(() => { window.localStorage.setItem('bioee-plant-equipment-v2', JSON.stringify(plantEquipment)); }, [plantEquipment]);
   useEffect(() => { window.localStorage.setItem('bioee-loss-causes', JSON.stringify(lossCauses)); }, [lossCauses]);
+  useEffect(() => { window.localStorage.setItem('bioee-product-standards', JSON.stringify(productStandards)); }, [productStandards]);
   useEffect(() => { window.localStorage.setItem('bioee-work-orders', JSON.stringify(workOrders)); }, [workOrders]);
   useEffect(() => { window.localStorage.setItem('bioee-records', JSON.stringify(records)); }, [records]);
   useEffect(() => {
@@ -875,7 +917,11 @@ export default function OEEApplication() {
                         <div className="flex min-w-48 items-center gap-2"><span className="flex-1 text-sm font-medium text-slate-700">{ot.registrar || 'Sin registrador'}</span>{ot.status === 'in_progress' && <button title="Ver OEE en tiempo real" onClick={() => setSelectedLiveOrder(activeSession?.id === ot.id ? activeSession : ot)} className="rounded-lg border border-blue-200 p-2 text-blue-600 hover:bg-blue-50"><Eye size={18}/></button>}</div>
                       ) : (
                          <Button variant="primary" className="!px-4 !py-2 text-sm" disabled={ot.status === 'in_progress' && ot.registrar !== currentUser.name} onClick={() => {
-                           setActiveSession(current => current?.id === ot.id ? current : {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, machineSpeed: 0, productionRegistered: false, losses: [], supportPersonnelCount: 0, overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: ot.targetWeight || '', processStart: '00:00', processEnd: '00:00', performanceEndTime: ''});
+                           setActiveSession(current => {
+                             if (current?.id === ot.id) return current;
+                             const standard = findProductStandard(ot.product, productStandards);
+                             return {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, machineSpeed: 0, productionRegistered: false, losses: [], supportPersonnelCount: 0, overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: standard?.target ?? ot.targetWeight ?? '', measurementUnit: standard?.unit || 'g', liquidMeasurement: Boolean(standard?.liquid), assistantMessages: [], processStart: '00:00', processEnd: '00:00', performanceEndTime: ''};
+                           });
                           setWorkOrders(current => current.map(order => order.id === ot.id ? { ...order, status: 'in_progress', registrar: currentUser.name } : order));
                           setCurrentView('active_production');
                         }}>{ot.status === 'in_progress' ? 'Continuar registro' : 'Registrar detenciones'} <ArrowRight size={16} /></Button>
@@ -896,7 +942,7 @@ export default function OEEApplication() {
   const ActiveProductionView = () => {
     const [lossModalOpen, setLossModalOpen] = useState(false);
     const [lossType, setLossType] = useState('availability'); // availability, performance, quality
-    const [lossForm, setLossForm] = useState({ cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
+    const [lossForm, setLossForm] = useState({ cause: '', durationHours: '0', durationMinutes: '0', occurrenceTime: currentTimeInput(), goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
     const [editingLossId, setEditingLossId] = useState(null);
     
     const [ticketModalOpen, setTicketModalOpen] = useState(false);
@@ -911,6 +957,11 @@ export default function OEEApplication() {
     const [materialForm, setMaterialForm] = useState({ type: 'Envasado', reason: '', code: '', description: '', quantity: '', unit: 'unidades' });
 
     if (!activeSession) return <div>No hay sesión activa.</div>;
+
+    const productStandard = findProductStandard(activeSession.product, productStandards);
+    const measurementUnit = productStandard?.unit || activeSession.measurementUnit || 'g';
+    const isLiquidMeasurement = Boolean(productStandard?.liquid || activeSession.liquidMeasurement);
+    const measurementTitle = isLiquidMeasurement ? 'Sobre medidas' : 'Sobre pesos';
 
     const metrics = calculateSessionMetrics(activeSession);
     const downtimeMetrics = calculateDowntimeMetrics(activeSession);
@@ -975,7 +1026,7 @@ export default function OEEApplication() {
 
     const resetLossEditor = () => {
       setEditingLossId(null);
-      setLossForm({ cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
+      setLossForm({ cause: '', durationHours: '0', durationMinutes: '0', occurrenceTime: currentTimeInput(), goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
       setMaintenanceTicket(null);
       setTicketForm({ priority: 'Media', detail: '', reportedBy: DUMMY_USER.name });
     };
@@ -990,7 +1041,7 @@ export default function OEEApplication() {
       setEditingLossId(loss.id);
       setLossType(loss.category);
       setLossForm({
-        cause: loss.cause || '', durationHours: String(Math.floor(Number(loss.duration || 0) / 60)), durationMinutes: String(Number(loss.duration || 0) % 60), goodQty: String(loss.goodQty ?? activeSession.goodQty ?? ''),
+        cause: loss.cause || '', durationHours: String(Math.floor(Number(loss.duration || 0) / 60)), durationMinutes: String(Number(loss.duration || 0) % 60), occurrenceTime: String(loss.time || currentTimeInput()).slice(0, 5), goodQty: String(loss.goodQty ?? activeSession.goodQty ?? ''),
         reprocessQty: String(loss.reprocessQty || ''), wasteQty: String(loss.wasteQty || ''),
         machineSpeed: String(loss.machineSpeed ?? activeSession.machineSpeed ?? ''), supportCount: String(loss.supportPersonnelCount || 0), comment: loss.comment || ''
       });
@@ -1026,7 +1077,7 @@ export default function OEEApplication() {
       const newLoss = {
         id: Date.now(),
         category: lossType,
-        cause: lossForm.cause,
+        cause: lossType === 'quality' ? 'Productos buenos' : lossForm.cause,
         duration: lossType === 'performance' || lossType === 'quality' ? 0 : selectedDuration,
         qty: lossType === 'quality' ? (parseInt(lossForm.reprocessQty) || 0) + (parseInt(lossForm.wasteQty) || 0) : 0,
         goodQty: lossType === 'quality' ? parseInt(lossForm.goodQty) || 0 : null,
@@ -1039,11 +1090,11 @@ export default function OEEApplication() {
         speedEndTime: null,
         ticketCode: requiresMaintenanceTicket ? maintenanceTicket?.code : null,
         ticket: requiresMaintenanceTicket ? maintenanceTicket : null,
-        time: new Date().toLocaleTimeString()
+        time: lossForm.occurrenceTime
       };
       
       const nextLosses = editingLossId
-        ? activeSession.losses.map(loss => loss.id === editingLossId ? { ...newLoss, id: editingLossId, time: loss.time } : loss)
+        ? activeSession.losses.map(loss => loss.id === editingLossId ? { ...newLoss, id: editingLossId } : loss)
         : [...activeSession.losses, newLoss];
       const nextSession = lossType === 'quality'
         ? { ...activeSession, realQty: productionRealPreview, machineSpeed: Number(newLoss.machineSpeed) || 0, productionRegistered: true }
@@ -1076,7 +1127,7 @@ export default function OEEApplication() {
     };
 
     const openOverweightModal = () => {
-      setTargetWeight(String(activeSession.targetWeight || ''));
+      setTargetWeight(String(productStandard?.target ?? activeSession.targetWeight ?? ''));
       setOverweightDraft([{ sampleSize: '', weights: [''], time: defaultOverweightTime(0), measuredBy: 'PD' }]);
       setOverweightModalOpen(true);
     };
@@ -1094,12 +1145,20 @@ export default function OEEApplication() {
     };
 
     const validOverweightSamples = overweightDraft.length > 0 && overweightDraft.every(sample => sample.time && Number(sample.sampleSize) > 0 && sample.weights.length === Number(sample.sampleSize) && sample.weights.every(weight => Number(weight) > 0));
+    const showQualityHistory = overweightDraft.some(sample => sample.measuredBy === 'CC');
+    const overweightHistory = (activeSession.overweights || []).map(item => ({ ...item, time: String(item.time || '').slice(0, 5) })).filter(item => item.time && Number(item.weight) > 0);
+    const overweightHistoryTimes = Array.from(new Set(overweightHistory.map(item => String(item.time)))) as string[];
+    overweightHistoryTimes.sort();
+    const overweightAverages = overweightHistoryTimes.map(time => {
+      const values = overweightHistory.filter(item => item.time === time).map(item => Number(item.weight));
+      return { time, average: values.reduce((sum, value) => sum + value, 0) / values.length };
+    });
 
     const saveOverweights = () => {
       if (!validOverweightSamples) return;
       const validRows = overweightDraft.flatMap((sample, sampleIndex) => sample.weights.map((weight, weightIndex) => ({ id: Date.now() + Math.random(), sampleId: `M-${Date.now()}-${sampleIndex + 1}`, sampleSize: Number(sample.sampleSize), measurement: weightIndex + 1, weight: Number(weight), quantity: 1, time: sample.time, measuredBy: sample.measuredBy })));
       if (!validRows.length) return;
-      setActiveSession(current => ({ ...current, targetWeight: Number(targetWeight) || current.targetWeight, overweights: [...(current.overweights || []), ...validRows] }));
+      setActiveSession(current => ({ ...current, targetWeight: Number(productStandard?.target ?? targetWeight) || current.targetWeight, measurementUnit, liquidMeasurement: isLiquidMeasurement, overweights: [...(current.overweights || []), ...validRows] }));
       setOverweightDraft([{ sampleSize: '', weights: [''], time: '', measuredBy: 'PD' }]);
       setOverweightModalOpen(false);
     };
@@ -1178,7 +1237,7 @@ export default function OEEApplication() {
           <button onClick={() => openNewLoss('planned_availability')} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-sky-200 bg-white p-4 transition-all hover:border-sky-500 hover:shadow-md"><div className="mb-2 rounded-full bg-sky-100 p-3 text-sky-700"><CheckSquare size={24}/></div><span className="font-bold text-slate-800">Detenciones planificadas</span><span className="text-center text-xs text-slate-500">Set up, limpieza y mantenimiento preventivo</span></button>
           <button onClick={() => openNewLoss('availability')} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-rose-200 bg-white p-4 transition-all hover:border-rose-500 hover:shadow-md"><div className="mb-2 rounded-full bg-rose-100 p-3 text-rose-600"><Pause size={24}/></div><span className="font-bold text-slate-800">Detenciones no planificadas</span><span className="text-center text-xs text-slate-500">Averías, bloqueos, cortes de servicio y otros</span></button>
           <button onClick={() => { const production = activeSession.losses.find(loss => loss.category === 'quality'); production ? openEditLoss(production) : openNewLoss('quality'); }} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-emerald-200 bg-white p-4 transition-all hover:border-emerald-500 hover:shadow-md"><div className="mb-2 rounded-full bg-emerald-100 p-3 text-emerald-700"><PackageCheck size={24}/></div><span className="font-bold text-slate-800">Producción real</span><span className="text-center text-xs text-slate-500">Unidades buenas, reproceso y desperdicio</span></button>
-          <button onClick={openOverweightModal} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-cyan-200 bg-white p-4 transition-all hover:border-cyan-500 hover:shadow-md"><div className="mb-2 rounded-full bg-cyan-100 p-3 text-cyan-700"><Scale size={24}/></div><span className="font-bold text-slate-800">Registrar sobrepeso</span><span className="text-center text-xs text-slate-500">Muestreos, pesos y hora de medición</span></button>
+          <button onClick={openOverweightModal} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-cyan-200 bg-white p-4 transition-all hover:border-cyan-500 hover:shadow-md"><div className="mb-2 rounded-full bg-cyan-100 p-3 text-cyan-700"><Scale size={24}/></div><span className="font-bold text-slate-800">Registrar {measurementTitle.toLowerCase()}</span><span className="text-center text-xs text-slate-500">Muestreos, mediciones y hora de control</span></button>
         </div>
         {/* Recent Events Log */}
         <Card className="mt-8">
@@ -1309,6 +1368,8 @@ export default function OEEApplication() {
               </div>
             )}
 
+            <TimeField label="Hora de ocurrencia" value={lossForm.occurrenceTime} onChange={(value) => setLossForm({...lossForm, occurrenceTime: value})}/>
+
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">{lossType === 'performance' ? 'Comentario de lo ocurrido' : 'Comentario (Opcional)'}</label>
               <textarea
@@ -1356,17 +1417,20 @@ export default function OEEApplication() {
           </div>
         </Modal>
 
-        <Modal isOpen={overweightModalOpen} onClose={() => setOverweightModalOpen(false)} title="Registrar sobrepeso">
+        <Modal wide={showQualityHistory} isOpen={overweightModalOpen} onClose={() => setOverweightModalOpen(false)} title={`Registrar ${measurementTitle.toLowerCase()}`}>
+          <div className={`grid gap-6 ${showQualityHistory ? 'lg:grid-cols-2' : ''}`}>
           <div className="space-y-4">
-            <p className="text-sm text-slate-600">Indica la cantidad muestreada y registra el peso individual de cada unidad medida.</p>
-            <div className="rounded-lg bg-cyan-50 p-3"><label className="text-sm font-semibold text-cyan-900">Peso objetivo / línea central (g)</label><input type="number" min="0" step="0.01" className="mt-1 w-full rounded border border-cyan-200 p-2" value={targetWeight} onChange={(event) => setTargetWeight(event.target.value)} placeholder="Ej. 250"/></div>
+            <p className="text-sm text-slate-600">Indica la cantidad muestreada y registra cada medición individual.</p>
+            <div className="rounded-lg bg-cyan-50 p-3"><label className="text-sm font-semibold text-cyan-900">Objetivo de {activeSession.product} ({measurementUnit})</label><input readOnly type="number" className="mt-1 w-full rounded border border-cyan-200 bg-white p-2 font-bold" value={targetWeight}/><p className="mt-1 text-xs text-cyan-800">Valor maestro guardado para este producto.</p></div>
             {overweightDraft.map((sample, sampleIndex) => <div key={sampleIndex} className="space-y-3 rounded-lg border border-slate-200 p-4">
               <div className="grid gap-3 sm:grid-cols-[1fr_160px_auto]"><div><label className="text-sm font-semibold text-slate-700">Cantidad muestreada</label><input type="number" min="1" max="100" className="mt-1 w-full rounded border border-slate-300 p-2" value={sample.sampleSize} onChange={(event) => updateSampleSize(sampleIndex, event.target.value)} placeholder="Ej. 5"/></div><TimeField label="Hora del muestreo" value={sample.time} onChange={(value) => updateSampleTime(sampleIndex, value)}/><button aria-label={`Eliminar muestreo ${sampleIndex + 1}`} disabled={overweightDraft.length === 1} onClick={() => setOverweightDraft(current => current.filter((_, index) => index !== sampleIndex))} className="self-end rounded p-2 text-rose-600 disabled:opacity-30"><Trash2 size={18}/></button></div>
               <div><p className="mb-2 text-sm font-semibold text-slate-700">Responsable de la medición</p><div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-1">{[['PD','Producción'],['CC','Control de calidad']].map(([value,label]) => <button key={value} type="button" onClick={() => updateSampleMeasuredBy(sampleIndex, value)} className={`rounded-md px-3 py-2 text-sm font-semibold transition ${sample.measuredBy === value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>{value} · {label}</button>)}</div></div>
-              {sample.weights.length > 0 && Number(sample.sampleSize) > 0 && <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{sample.weights.map((weight, weightIndex) => <div key={weightIndex}><label className="text-xs font-semibold text-slate-500">Peso {weightIndex + 1} (g)</label><input type="number" min="0" step="0.01" className="mt-1 w-full rounded border border-slate-300 p-2" value={weight} onChange={(event) => updateSampleWeight(sampleIndex, weightIndex, event.target.value)}/></div>)}</div>}
+              {sample.weights.length > 0 && Number(sample.sampleSize) > 0 && <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{sample.weights.map((weight, weightIndex) => <div key={weightIndex}><label className="text-xs font-semibold text-slate-500">Medición {weightIndex + 1} ({measurementUnit})</label><input type="number" min="0" step="0.01" className="mt-1 w-full rounded border border-slate-300 p-2" value={weight} onChange={(event) => updateSampleWeight(sampleIndex, weightIndex, event.target.value)}/></div>)}</div>}
             </div>)}
             <Button variant="secondary" className="w-full" onClick={addOverweightSample}><Plus size={18}/> Agregar otro muestreo</Button>
             <Button className="w-full" disabled={!validOverweightSamples} onClick={saveOverweights}>Guardar muestreos</Button>
+          </div>
+          {showQualityHistory && <div className="min-w-0 rounded-xl border border-cyan-200 bg-slate-50 p-4"><h4 className="font-bold text-slate-900">Historial de esta OT</h4><p className="mb-3 text-xs text-slate-500">Dispersión de mediciones registradas. Desplázate horizontalmente para revisar todas las horas.</p>{overweightHistory.length ? <div className="overflow-x-auto pb-3"><div style={{minWidth: `${Math.max(620, overweightHistoryTimes.length * 125)}px`}}><ScatterChart width={Math.max(620, overweightHistoryTimes.length * 125)} height={330} margin={{top:15,right:20,bottom:25,left:10}}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="time" type="category" name="Hora"/><YAxis dataKey="weight" type="number" domain={['auto','auto']} name={measurementUnit}/><RechartsTooltip formatter={(value) => [`${Number(value).toFixed(2)} ${measurementUnit}`, 'Medición']}/><ReferenceLine y={Number(targetWeight)} stroke="#2563eb" strokeDasharray="6 4" label="Objetivo"/><Scatter data={overweightHistory} fill="#0891b2"/></ScatterChart><div className="flex px-14">{overweightAverages.map(item => <div key={item.time} className="min-w-[125px] flex-1 text-center"><p className="text-[11px] text-slate-500">Promedio</p><p className="text-xs font-bold text-cyan-700">{item.average.toFixed(2)} {measurementUnit}</p></div>)}</div></div></div> : <div className="flex h-72 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center text-sm text-slate-500">Aún no hay mediciones guardadas para esta OT.</div>}</div>}
           </div>
         </Modal>
         <Modal isOpen={materialModalOpen} onClose={() => setMaterialModalOpen(false)} title="Registrar descarte de material">
@@ -1511,9 +1575,16 @@ export default function OEEApplication() {
   };
 
   const AIAssistantView = () => {
-    const [messages, setMessages] = useState([
-      { role: 'ai', text: 'Hola Carlos. He analizado las detenciones no planificadas registradas. ¿Qué equipo, causa u orden deseas revisar?' }
-    ]);
+    const welcomeMessage = { role: 'ai', text: `Hola ${currentUser?.name || ''}. Puedo ayudarte a registrar y entender detenciones, controles de medición y eventos de la OT. ¿Qué deseas consultar?` };
+    const [supervisorMessages, setSupervisorMessages] = useState([welcomeMessage]);
+    const messages = role === 'responsible_operator'
+      ? (activeSession?.assistantMessages?.length ? activeSession.assistantMessages : [welcomeMessage])
+      : supervisorMessages;
+    const setMessages = (nextMessages) => {
+      const resolved = typeof nextMessages === 'function' ? nextMessages(messages) : nextMessages;
+      if (role === 'responsible_operator' && activeSession) setActiveSession(current => current ? { ...current, assistantMessages: resolved } : current);
+      else setSupervisorMessages(resolved);
+    };
     const [input, setInput] = useState('');
     const messagesEndRef = useRef(null);
 
@@ -1530,18 +1601,12 @@ export default function OEEApplication() {
       setMessages(newMessages);
       setInput('');
 
-      // Simulate AI response delay
       setTimeout(() => {
-        let aiResponse = "He revisado la base de datos. ";
-        const lowerInput = input.toLowerCase();
-        
-        if(lowerInput.includes('avería') || lowerInput.includes('pérdida')) {
-          aiResponse += "Las averías concentran la mayor parte del tiempo de detención no planificada. Conviene priorizar el equipo con más minutos acumulados.";
-        } else if (lowerInput.includes('disponibilidad') || lowerInput.includes('tendencia')) {
-          aiResponse += "La disponibilidad se calcula usando el tiempo de operación registrado menos las detenciones no planificadas.";
-        } else {
-          aiResponse += "Las principales oportunidades se muestran por causa, máquina y orden de trabajo para facilitar la priorización del mantenimiento.";
-        }
+        const lowerInput = normalizeText(input);
+        const knowledge = ASSISTANT_KNOWLEDGE.find(item => item.keywords.some(keyword => lowerInput.includes(normalizeText(keyword))));
+        let aiResponse = knowledge?.answer;
+        if (!aiResponse && (lowerInput.includes('disponibilidad') || lowerInput.includes('oee'))) aiResponse = 'La disponibilidad compara el tiempo productivo con el tiempo total de operación. En BIOEE B, el OEE se calcula como el tiempo teórico requerido para fabricar las unidades buenas, dividido entre el tiempo planificado entre inicio y fin.';
+        if (!aiResponse) aiResponse = 'Puedo orientarte sobre cambios de formato, limpieza, mantenimiento preventivo, averías mecánicas o eléctricas, bloqueos, cortes de servicios y controles de sobrepeso o sobremedida. Describe el evento o la duda con tus propias palabras.';
 
         setMessages([...newMessages, { role: 'ai', text: aiResponse }]);
       }, 1500);
@@ -1553,7 +1618,7 @@ export default function OEEApplication() {
           <div className="bg-blue-500 p-2 rounded-full"><Bot size={24} /></div>
           <div>
             <h2 className="font-bold">Asistente OEE Analítico</h2>
-            <p className="text-xs text-blue-200">Impulsado por IA - Analizando históricos MES</p>
+            <p className="text-xs text-blue-200">Guía operativa y consulta contextual de la OT</p>
           </div>
         </div>
         
@@ -1605,7 +1670,7 @@ export default function OEEApplication() {
           <SidebarItem icon={ClipboardList} label="Órdenes (OT)" viewId="work_orders" />
           {role === 'supervisor' && <SidebarItem icon={CheckSquare} label="Validaciones" viewId="validations" />}
           {role === 'supervisor' && <SidebarItem icon={Settings} label="Administración" viewId="administration" />}
-          {role === 'supervisor' && <SidebarItem icon={Bot} label="Asistente IA" viewId="ai" />}
+          <SidebarItem icon={Bot} label="Asistente IA" viewId="ai" />
         </div>
 
         <div className="p-4 border-t border-slate-800">
