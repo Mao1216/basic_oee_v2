@@ -942,7 +942,7 @@ export default function OEEApplication() {
   const ActiveProductionView = () => {
     const [lossModalOpen, setLossModalOpen] = useState(false);
     const [lossType, setLossType] = useState('availability'); // availability, performance, quality
-    const [lossForm, setLossForm] = useState({ cause: '', durationHours: '0', durationMinutes: '0', occurrenceTime: currentTimeInput(), goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
+    const [lossForm, setLossForm] = useState({ cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
     const [editingLossId, setEditingLossId] = useState(null);
     
     const [ticketModalOpen, setTicketModalOpen] = useState(false);
@@ -1026,7 +1026,7 @@ export default function OEEApplication() {
 
     const resetLossEditor = () => {
       setEditingLossId(null);
-      setLossForm({ cause: '', durationHours: '0', durationMinutes: '0', occurrenceTime: currentTimeInput(), goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
+      setLossForm({ cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
       setMaintenanceTicket(null);
       setTicketForm({ priority: 'Media', detail: '', reportedBy: DUMMY_USER.name });
     };
@@ -1041,7 +1041,7 @@ export default function OEEApplication() {
       setEditingLossId(loss.id);
       setLossType(loss.category);
       setLossForm({
-        cause: loss.cause || '', durationHours: String(Math.floor(Number(loss.duration || 0) / 60)), durationMinutes: String(Number(loss.duration || 0) % 60), occurrenceTime: String(loss.time || currentTimeInput()).slice(0, 5), goodQty: String(loss.goodQty ?? activeSession.goodQty ?? ''),
+        cause: loss.cause || '', durationHours: String(Math.floor(Number(loss.duration || 0) / 60)), durationMinutes: String(Number(loss.duration || 0) % 60), goodQty: String(loss.goodQty ?? activeSession.goodQty ?? ''),
         reprocessQty: String(loss.reprocessQty || ''), wasteQty: String(loss.wasteQty || ''),
         machineSpeed: String(loss.machineSpeed ?? activeSession.machineSpeed ?? ''), supportCount: String(loss.supportPersonnelCount || 0), comment: loss.comment || ''
       });
@@ -1090,7 +1090,7 @@ export default function OEEApplication() {
         speedEndTime: null,
         ticketCode: requiresMaintenanceTicket ? maintenanceTicket?.code : null,
         ticket: requiresMaintenanceTicket ? maintenanceTicket : null,
-        time: lossForm.occurrenceTime
+        time: new Date().toLocaleTimeString()
       };
       
       const nextLosses = editingLossId
@@ -1153,6 +1153,14 @@ export default function OEEApplication() {
       const values = overweightHistory.filter(item => item.time === time).map(item => Number(item.weight));
       return { time, average: values.reduce((sum, value) => sum + value, 0) / values.length };
     });
+    const overweightAverageByTime = Object.fromEntries(overweightAverages.map(item => [item.time, item.average]));
+    const historyCentralValue = Number(productStandard?.target ?? targetWeight ?? activeSession.targetWeight) || 0;
+    const historyTolerance = 0.5;
+    const historyLowerTolerance = historyCentralValue - historyTolerance;
+    const historyUpperTolerance = historyCentralValue + historyTolerance;
+    const historyZoomDomain = [Math.max(0, historyLowerTolerance - historyTolerance * 0.5), historyUpperTolerance + historyTolerance * 0.5];
+    const historyOutsideZoom = overweightHistory.filter(item => Number(item.weight) < historyZoomDomain[0] || Number(item.weight) > historyZoomDomain[1]).length;
+    const HistoryHourTick = ({ x = 0, y = 0, payload = { value: '' } }: any) => <g transform={`translate(${x},${y})`}><text x={0} y={12} textAnchor="middle" fill="#475569" fontSize={12}>{payload.value}</text><text x={0} y={29} textAnchor="middle" fill="#0891b2" fontSize={10} fontWeight={700}>Prom. {Number(overweightAverageByTime[payload.value] || 0).toFixed(2)}</text></g>;
 
     const saveOverweights = () => {
       if (!validOverweightSamples) return;
@@ -1260,7 +1268,7 @@ export default function OEEApplication() {
                         {loss.category === 'planned_availability' ? <CheckSquare size={18}/> : loss.category === 'availability' ? <Pause size={18}/> : loss.category === 'performance' ? <AlertOctagon size={18}/> : <AlertTriangle size={18}/>}
                       </div>
                       <div>
-                        <p className="font-medium text-slate-800">{loss.cause}</p>
+                        <p className="font-medium text-slate-800">{loss.category === 'quality' ? 'Productos buenos' : loss.cause}</p>
                         <p className="text-xs text-slate-500">{loss.time} {loss.comment && `- ${loss.comment}`}</p>
                         {loss.category === 'planned_availability' && Number(loss.supportPersonnelCount || 0) > 0 && <p className="mt-1 text-xs font-medium text-sky-700">Personal de apoyo: {Number(loss.supportPersonnelCount)} persona(s)</p>}
                         {loss.ticketCode && (
@@ -1368,8 +1376,6 @@ export default function OEEApplication() {
               </div>
             )}
 
-            <TimeField label="Hora de ocurrencia" value={lossForm.occurrenceTime} onChange={(value) => setLossForm({...lossForm, occurrenceTime: value})}/>
-
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">{lossType === 'performance' ? 'Comentario de lo ocurrido' : 'Comentario (Opcional)'}</label>
               <textarea
@@ -1430,7 +1436,7 @@ export default function OEEApplication() {
             <Button variant="secondary" className="w-full" onClick={addOverweightSample}><Plus size={18}/> Agregar otro muestreo</Button>
             <Button className="w-full" disabled={!validOverweightSamples} onClick={saveOverweights}>Guardar muestreos</Button>
           </div>
-          {showQualityHistory && <div className="min-w-0 rounded-xl border border-cyan-200 bg-slate-50 p-4"><h4 className="font-bold text-slate-900">Historial de esta OT</h4><p className="mb-3 text-xs text-slate-500">Dispersión de mediciones registradas. Desplázate horizontalmente para revisar todas las horas.</p>{overweightHistory.length ? <div className="overflow-x-auto pb-3"><div style={{minWidth: `${Math.max(620, overweightHistoryTimes.length * 125)}px`}}><ScatterChart width={Math.max(620, overweightHistoryTimes.length * 125)} height={330} margin={{top:15,right:20,bottom:25,left:10}}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="time" type="category" name="Hora"/><YAxis dataKey="weight" type="number" domain={['auto','auto']} name={measurementUnit}/><RechartsTooltip formatter={(value) => [`${Number(value).toFixed(2)} ${measurementUnit}`, 'Medición']}/><ReferenceLine y={Number(targetWeight)} stroke="#2563eb" strokeDasharray="6 4" label="Objetivo"/><Scatter data={overweightHistory} fill="#0891b2"/></ScatterChart><div className="flex px-14">{overweightAverages.map(item => <div key={item.time} className="min-w-[125px] flex-1 text-center"><p className="text-[11px] text-slate-500">Promedio</p><p className="text-xs font-bold text-cyan-700">{item.average.toFixed(2)} {measurementUnit}</p></div>)}</div></div></div> : <div className="flex h-72 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center text-sm text-slate-500">Aún no hay mediciones guardadas para esta OT.</div>}</div>}
+          {showQualityHistory && <div className="min-w-0 rounded-xl border border-cyan-200 bg-slate-50 p-4"><h4 className="font-bold text-slate-900">Historial de esta OT</h4><p className="mb-3 text-xs text-slate-500">Línea central y tolerancias ±0.5 {measurementUnit}. Debajo de cada hora se muestra su promedio.</p>{overweightHistory.length ? <><div className="mb-2 flex flex-wrap gap-2 text-[11px] font-semibold"><span className="rounded-full bg-rose-50 px-2 py-1 text-rose-700">Inferior: {historyLowerTolerance.toFixed(2)} {measurementUnit}</span><span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">Objetivo: {historyCentralValue.toFixed(2)} {measurementUnit}</span><span className="rounded-full bg-rose-50 px-2 py-1 text-rose-700">Superior: {historyUpperTolerance.toFixed(2)} {measurementUnit}</span></div><div className="overflow-x-auto pb-3"><div style={{minWidth: `${Math.max(620, overweightHistoryTimes.length * 125)}px`}}><ScatterChart width={Math.max(620, overweightHistoryTimes.length * 125)} height={350} margin={{top:18,right:28,bottom:45,left:10}}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="time" type="category" name="Hora" tick={<HistoryHourTick/>} interval={0}/><YAxis dataKey="weight" type="number" domain={historyZoomDomain} allowDataOverflow name={measurementUnit} unit={` ${measurementUnit}`} tickCount={9}/><RechartsTooltip formatter={(value) => [`${Number(value).toFixed(2)} ${measurementUnit}`, 'Medición']}/><ReferenceLine y={historyUpperTolerance} stroke={COLORS.critical} strokeWidth={2} strokeDasharray="6 4" label={{value:`+0.5 ${measurementUnit}`,position:'insideTopRight',fill:COLORS.critical}}/><ReferenceLine y={historyCentralValue} stroke={COLORS.primary} strokeWidth={3} label={{value:'Objetivo',position:'insideTopRight',fill:COLORS.primary}}/><ReferenceLine y={historyLowerTolerance} stroke={COLORS.critical} strokeWidth={2} strokeDasharray="6 4" label={{value:`-0.5 ${measurementUnit}`,position:'insideBottomRight',fill:COLORS.critical}}/><Scatter data={overweightHistory}>{overweightHistory.map((item,index) => <Cell key={`${item.time}-${index}`} fill={Number(item.weight) >= historyLowerTolerance && Number(item.weight) <= historyUpperTolerance ? '#10b981' : '#ef4444'}/>)}</Scatter></ScatterChart></div></div>{historyOutsideZoom > 0 && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{historyOutsideZoom} medición(es) extrema(s) quedan fuera del zoom para mantener visibles las tolerancias.</p>}</> : <div className="flex h-72 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center text-sm text-slate-500">Aún no hay mediciones guardadas para esta OT.</div>}</div>}
           </div>
         </Modal>
         <Modal isOpen={materialModalOpen} onClose={() => setMaterialModalOpen(false)} title="Registrar descarte de material">
