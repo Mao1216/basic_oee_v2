@@ -60,6 +60,12 @@ const currentDateInput = () => {
 };
 
 const processElapsedMinutes = (session) => {
+  if (Array.isArray(session?.processTimeEntries) && session.processTimeEntries.length) {
+    return session.processTimeEntries.reduce((sum, entry) => {
+      if (!entry?.date || !entry?.start || !entry?.end) return sum;
+      return sum + elapsedMinutes(entry.start, entry.end);
+    }, 0);
+  }
   if (session?.processStartDate && session?.processEndDate && session?.processStart && session?.processEnd) {
     const start = new Date(`${session.processStartDate}T${session.processStart}:00`);
     const end = new Date(`${session.processEndDate}T${session.processEnd}:00`);
@@ -67,6 +73,18 @@ const processElapsedMinutes = (session) => {
     return Number.isFinite(difference) ? Math.max(0, difference) : 0;
   }
   return elapsedMinutes(session?.processStart, session?.processEnd);
+};
+
+const getProcessTimeEntries = (session) => {
+  if (Array.isArray(session?.processTimeEntries)) return session.processTimeEntries;
+  if (session?.processStartDate || session?.processEndDate) {
+    if (session.processStartDate === session.processEndDate) return [{ id: `legacy-${session.processStartDate}`, date: session.processStartDate, start: session.processStart || '', end: session.processEnd || '' }];
+    return [
+      { id: `legacy-start-${session.processStartDate}`, date: session.processStartDate || '', start: session.processStart || '', end: '' },
+      { id: `legacy-end-${session.processEndDate}`, date: session.processEndDate || '', start: '', end: session.processEnd || '' }
+    ].filter(entry => entry.date);
+  }
+  return [];
 };
 
 const MetricGauge = ({ value, color }) => {
@@ -983,7 +1001,7 @@ export default function OEEApplication() {
                              if (current?.id === ot.id) return current;
                              if (sessionDrafts[ot.id]) return sessionDrafts[ot.id];
                              const standard = findProductStandard(ot.product, productStandards);
-                             return {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, samplingQty: 0, overweightDeviationQty: 0, machineSpeed: 0, productionRegistered: false, losses: [], supportPersonnelCount: 0, overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: standard?.target ?? ot.targetWeight ?? '', measurementUnit: standard?.unit || 'g', liquidMeasurement: Boolean(standard?.liquid), assistantMessages: [], processStartDate: currentDateInput(), processStart: '00:00', processEndDate: currentDateInput(), processEnd: '00:00', performanceEndTime: ''};
+                             return {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, samplingQty: 0, overweightDeviationQty: 0, machineSpeed: 0, productionRegistered: false, losses: [], supportPersonnelCount: 0, overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: standard?.target ?? ot.targetWeight ?? '', measurementUnit: standard?.unit || 'g', liquidMeasurement: Boolean(standard?.liquid), assistantMessages: [], processTimeEntries: [], processStartDate: '', processStart: '', processEndDate: '', processEnd: '', performanceEndTime: ''};
                            });
                           setWorkOrders(current => current.map(order => order.id === ot.id ? { ...order, status: 'in_progress', registrar: currentUser.name } : order));
                           setCurrentView('active_production');
@@ -1044,7 +1062,10 @@ export default function OEEApplication() {
 
     const metrics = calculateSessionMetrics(activeSession);
     const downtimeMetrics = calculateDowntimeMetrics(activeSession);
-    const mandatoryReady = Boolean(activeSession.processStartDate && activeSession.processStart && activeSession.processEndDate && activeSession.processEnd && activeSession.productionRegistered);
+    const processTimeEntries = getProcessTimeEntries(activeSession);
+    const todayProcessEntryExists = processTimeEntries.some(entry => entry.date === currentDateInput());
+    const processScheduleReady = processTimeEntries.length > 0 && processTimeEntries.every(entry => entry.date && entry.start && entry.end && elapsedMinutes(entry.start, entry.end) > 0);
+    const mandatoryReady = Boolean(processScheduleReady && activeSession.productionRegistered);
     const productionRealPreview = Math.max(0, Math.round(
       (Number(lossForm.machineSpeed) || 0) * Math.max(0,
         processElapsedMinutes(activeSession) -
@@ -1057,10 +1078,19 @@ export default function OEEApplication() {
     const manuallyJustifiedUnits = Number(lossForm.reprocessQty || 0) + Number(lossForm.wasteQty || 0) + Number(lossForm.samplingQty || 0);
     const overweightDeviationPreview = Math.max(0, missingProductionUnits - manuallyJustifiedUnits);
     const requiresMaintenanceTicket = lossForm.cause === 'Avería mecánica' || lossForm.cause === 'Avería eléctrica';
-    const updateProcessTime = (field, value) => {
+    const saveProcessTimeEntries = (entries) => {
       setActiveSession(current => {
         if (!current) return current;
-        const nextSession = { ...current, [field]: value };
+        const firstEntry = entries[0];
+        const lastEntry = entries[entries.length - 1];
+        const nextSession = {
+          ...current,
+          processTimeEntries: entries,
+          processStartDate: firstEntry?.date || '',
+          processStart: firstEntry?.start || '',
+          processEndDate: lastEntry?.date || '',
+          processEnd: lastEntry?.end || ''
+        };
         if (!nextSession.productionRegistered || Number(nextSession.machineSpeed) <= 0) return nextSession;
         const totalDowntime = nextSession.losses
           .filter(loss => loss.category === 'planned_availability' || loss.category === 'availability')
@@ -1070,6 +1100,21 @@ export default function OEEApplication() {
           realQty: Math.max(0, Math.round(Number(nextSession.machineSpeed) * Math.max(0, processElapsedMinutes(nextSession) - totalDowntime)))
         };
       });
+    };
+
+    const addTodayProcessEntry = () => {
+      const today = currentDateInput();
+      if (processTimeEntries.some(entry => entry.date === today)) return;
+      saveProcessTimeEntries([...processTimeEntries, { id: `day-${today}-${Date.now()}`, date: today, start: '', end: '' }]);
+    };
+
+    const updateProcessTimeEntry = (entryId, field, value) => {
+      saveProcessTimeEntries(processTimeEntries.map(entry => entry.id === entryId ? { ...entry, [field]: value } : entry));
+    };
+
+    const removeProcessTimeEntry = (entryId) => {
+      if (!window.confirm('¿Quitar esta jornada del cálculo del tiempo de operación?')) return;
+      saveProcessTimeEntries(processTimeEntries.filter(entry => entry.id !== entryId));
     };
 
     const openSupportModal = () => {
@@ -1381,10 +1426,10 @@ export default function OEEApplication() {
               <p className="text-xs text-slate-400">{Number(activeSession.supportPersonnelCount || 0)} persona(s) de apoyo</p>
             </div>
             <div className="text-center">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="space-y-2"><label className="block text-left text-xs font-medium text-slate-400">Día de inicio</label><input type="date" value={activeSession.processStartDate || ''} onChange={(event) => updateProcessTime('processStartDate', event.target.value)} className="w-full rounded-lg border border-slate-500 bg-white px-3 py-2 text-slate-900"/><TimeField label="Hora de inicio" value={activeSession.processStart} onChange={(value) => updateProcessTime('processStart', value)}/></div>
-                <div className="space-y-2"><label className="block text-left text-xs font-medium text-slate-400">Día de fin</label><input type="date" min={activeSession.processStartDate || undefined} value={activeSession.processEndDate || ''} onChange={(event) => updateProcessTime('processEndDate', event.target.value)} className="w-full rounded-lg border border-slate-500 bg-white px-3 py-2 text-slate-900"/><TimeField label="Hora de fin" value={activeSession.processEnd} onChange={(value) => updateProcessTime('processEnd', value)}/></div>
-              </div>
+              <Button variant="secondary" disabled={todayProcessEntryExists} onClick={addTodayProcessEntry} className="!px-4 !py-2">
+                <Plus size={16}/> {todayProcessEntryExists ? 'Jornada de hoy agregada' : 'Agregar jornada de hoy'}
+              </Button>
+              <p className="mt-1 text-xs text-slate-400">La fecha se toma automáticamente del dispositivo.</p>
             </div>
             <div className="text-center hidden md:block">
               <p className="text-slate-400">Planificado</p>
@@ -1392,6 +1437,17 @@ export default function OEEApplication() {
             </div>
           </div>
         </div>
+
+        <Card className="border border-blue-100 bg-blue-50/50 p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-slate-800">Jornadas del proceso</h3><p className="text-xs text-slate-500">Registra las horas trabajadas cada día. El tiempo de operación suma todas las jornadas.</p></div><span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">Total: {processElapsedMinutes(activeSession).toFixed(0)} min</span></div>
+          {!todayProcessEntryExists && processTimeEntries.length > 0 && <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">El proceso continúa en una nueva fecha. Agrega la jornada de hoy para registrar sus horas.</div>}
+          {processTimeEntries.length ? <div className="space-y-3">{processTimeEntries.map((entry, index) => <div key={entry.id} className="grid items-end gap-3 rounded-xl border border-blue-100 bg-white p-3 sm:grid-cols-[150px_1fr_1fr_auto]">
+            <div><p className="mb-1 text-xs font-semibold text-slate-500">Día {index + 1}</p><p className="rounded-lg bg-slate-100 px-3 py-2 font-bold text-slate-800">{entry.date ? new Date(`${entry.date}T12:00:00`).toLocaleDateString('es-PE') : 'Sin fecha'}</p></div>
+            <TimeField label="Hora de inicio" value={entry.start} onChange={(value) => updateProcessTimeEntry(entry.id, 'start', value)}/>
+            <TimeField label="Hora de fin" value={entry.end} onChange={(value) => updateProcessTimeEntry(entry.id, 'end', value)}/>
+            <button type="button" onClick={() => removeProcessTimeEntry(entry.id)} className="rounded-lg border border-rose-200 p-2.5 text-rose-600 hover:bg-rose-50" title="Quitar jornada"><Trash2 size={17}/></button>
+          </div>)}</div> : <div className="rounded-lg border border-dashed border-blue-200 bg-white py-5 text-center text-sm text-slate-500">Pulsa “Agregar jornada de hoy” para ingresar las horas del proceso.</div>}
+        </Card>
 
         <div className="grid gap-4 md:grid-cols-4">
           <Card className="border-l-4 border-l-blue-500 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">Tiempo de operación</p><h3 className="text-2xl font-bold text-slate-900">{downtimeMetrics.operationMinutes.toFixed(0)} min</h3></div><Timer className="shrink-0 text-slate-500" size={48} strokeWidth={1.8}/></div></Card>
@@ -1459,7 +1515,7 @@ export default function OEEApplication() {
         {/* Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-white border-t border-slate-200 p-4 flex justify-between items-center z-40">
           <Button variant="ghost">Guardar Borrador</Button>
-          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Registra los días, horas de inicio y fin, y la producción real'}>
+          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Completa las horas de todas las jornadas y registra la producción real'}>
             <CheckCircle size={20} /> Finalizar y Enviar a Revisión
           </Button>
         </div>
