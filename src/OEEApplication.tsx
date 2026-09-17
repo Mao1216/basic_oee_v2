@@ -54,6 +54,21 @@ const addMinutesToTime = (time, minutesToAdd) => {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 };
 
+const currentDateInput = () => {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const processElapsedMinutes = (session) => {
+  if (session?.processStartDate && session?.processEndDate && session?.processStart && session?.processEnd) {
+    const start = new Date(`${session.processStartDate}T${session.processStart}:00`);
+    const end = new Date(`${session.processEndDate}T${session.processEnd}:00`);
+    const difference = (end.getTime() - start.getTime()) / 60000;
+    return Number.isFinite(difference) ? Math.max(0, difference) : 0;
+  }
+  return elapsedMinutes(session?.processStart, session?.processEnd);
+};
+
 const MetricGauge = ({ value, color }) => {
   const percentage = Math.max(0, Math.min(100, Number(value) || 0));
   const angle = Math.PI + (Math.PI * percentage / 100);
@@ -70,7 +85,7 @@ const MetricGauge = ({ value, color }) => {
 };
 
 const calculateDowntimeMetrics = (session) => {
-  const operationMinutes = elapsedMinutes(session?.processStart, session?.processEnd);
+  const operationMinutes = processElapsedMinutes(session);
   const plannedLosses = (session?.losses || []).filter(loss => loss.category === 'planned_availability');
   const unplannedLosses = (session?.losses || []).filter(loss => loss.category === 'availability');
   const plannedDowntimeMinutes = plannedLosses.reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
@@ -308,7 +323,7 @@ const RecordDetails = ({ record }: { record: any; metrics?: any; readOnly?: bool
   const metrics = calculateDowntimeMetrics(record);
   const losses = (record.losses || []).filter(loss => ['availability', 'planned_availability', 'quality'].includes(loss.category));
   const tickets = losses.filter(loss => loss.ticketCode || loss.ticket);
-  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Lote</p><p className="font-bold">{record.lot || 'Sin lote'}</p></div><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Equipo</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || record.registrar || 'Sin registrador'}</p></div></div><div className="grid gap-2 sm:grid-cols-4">{[['Tiempo operación',metrics.operationMinutes,' min'],['Det. no planificadas',metrics.downtimeMinutes,' min'],['Disponibilidad',metrics.availability,'%'],['OEE',metrics.oee,'%']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(unit === '%' ? 2 : 0)}{unit}</p></div>)}</div><div><h4 className="mb-2 font-bold text-slate-800">Registros de la OT</h4>{losses.length ? <div className="space-y-2">{losses.map(loss => <div key={loss.id} className={`rounded-lg border p-3 text-sm ${loss.category === 'planned_availability' ? 'border-sky-200 bg-sky-50' : loss.category === 'quality' ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}><div className="flex justify-between gap-3"><p className="font-bold text-slate-900">{loss.category === 'quality' ? 'Producción real' : loss.cause}</p><p className="font-bold">{loss.category === 'quality' ? `${Number(loss.goodQty || 0).toLocaleString()} und buenas` : `${Number(loss.duration || 0)} min`}</p></div><p className="mt-1 text-slate-600">{loss.comment || 'Sin comentario'}</p>{loss.category === 'planned_availability' && Number(loss.supportPersonnelCount || loss.supportOperators?.length || 0) > 0 && <p className="mt-1 text-xs font-medium text-sky-700">Personal de apoyo: {Number(loss.supportPersonnelCount || loss.supportOperators?.length || 0)} persona(s)</p>}</div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Sin registros.</p>}</div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p></div>)}</div></div>}</div>;
+  return <div className="space-y-5"><div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Lote</p><p className="font-bold">{record.lot || 'Sin lote'}</p></div><div><p className="text-xs text-slate-500">OT</p><p className="font-bold">{record.workOrderId || record.id}</p></div><div><p className="text-xs text-slate-500">Equipo</p><p className="font-semibold">{record.machine}</p></div><div><p className="text-xs text-slate-500">Operario</p><p className="font-semibold">{record.operator || record.registrar || 'Sin registrador'}</p></div></div><div className="grid gap-2 sm:grid-cols-4">{[['Tiempo operación',metrics.operationMinutes,' min'],['Det. no planificadas',metrics.downtimeMinutes,' min'],['Disponibilidad',metrics.availability,'%'],['OEE',metrics.oee,'%']].map(([label,value,unit]) => <div key={label} className="rounded-lg bg-slate-50 p-3 text-center"><p className="text-xs text-slate-500">{label}</p><p className="font-bold">{Number(value).toFixed(unit === '%' ? 2 : 0)}{unit}</p></div>)}</div><div><h4 className="mb-2 font-bold text-slate-800">Registros de la OT</h4>{losses.length ? <div className="space-y-2">{losses.map(loss => <div key={loss.id} className={`rounded-lg border p-3 text-sm ${loss.category === 'planned_availability' ? 'border-sky-200 bg-sky-50' : loss.category === 'quality' ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}><div className="flex justify-between gap-3"><p className="font-bold text-slate-900">{loss.category === 'quality' ? 'Producción real' : loss.cause}</p><p className="font-bold">{loss.category === 'quality' ? `${Number(loss.goodQty || 0).toLocaleString()} und conformes` : loss.category === 'availability' && Number(loss.duration || 0) <= 0 ? 'Aun no se ha registrado tiempo' : `${Number(loss.duration || 0)} min`}</p></div><p className="mt-1 text-slate-600">{loss.comment || 'Sin comentario'}</p>{loss.category === 'planned_availability' && Number(loss.supportPersonnelCount || loss.supportOperators?.length || 0) > 0 && <p className="mt-1 text-xs font-medium text-sky-700">Personal de apoyo: {Number(loss.supportPersonnelCount || loss.supportOperators?.length || 0)} persona(s)</p>}</div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Sin registros.</p>}</div>{tickets.length > 0 && <div><h4 className="mb-2 font-bold text-slate-800">Tickets de mantenimiento</h4><div className="space-y-2">{tickets.map(loss => <div key={loss.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-bold text-amber-900">{loss.ticketCode || loss.ticket?.code}</p><p className="mt-1 text-slate-600">{loss.ticket?.detail || loss.comment || 'Sin detalle adicional'}</p></div>)}</div></div>}</div>;
 };
 
 export default function OEEApplication() {
@@ -819,7 +834,7 @@ export default function OEEApplication() {
       return summary;
     }, {});
     const temporalOeeData = Object.values(temporalGroups).sort((first: any, second: any) => first.key.localeCompare(second.key)).map((item: any) => ({ period: item.label, oee: item.weight ? item.weightedOee / item.weight : 0 }));
-    const totalShiftMinutes = sourceRecords.reduce((sum, record) => sum + elapsedMinutes(record.processStart, record.processEnd), 0);
+    const totalShiftMinutes = sourceRecords.reduce((sum, record) => sum + processElapsedMinutes(record), 0);
     const totalPlannedExclusions = sourceRecords.flatMap(record => record.losses || []).filter(loss => loss.category === 'planned_availability').reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
     const plannedMinutes = Math.max(0, totalShiftMinutes);
     const totalUnplannedDowntime = sourceRecords.flatMap(record => record.losses || []).filter(loss => loss.category === 'availability').reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
@@ -827,7 +842,7 @@ export default function OEEApplication() {
     const operatingMinutes = Math.max(0, plannedMinutes - totalDowntime);
     const totalProduction = sourceRecords.reduce((sum, record) => sum + Number(record.realQty || 0), 0);
     const theoreticalProduction = sourceRecords.reduce((sum, record) => {
-      const recordMinutes = Math.max(0, elapsedMinutes(record.processStart, record.processEnd) - (record.losses || []).filter(loss => ['planned_availability', 'availability'].includes(loss.category)).reduce((lossSum, loss) => lossSum + Number(loss.duration || 0), 0));
+      const recordMinutes = Math.max(0, processElapsedMinutes(record) - (record.losses || []).filter(loss => ['planned_availability', 'availability'].includes(loss.category)).reduce((lossSum, loss) => lossSum + Number(loss.duration || 0), 0));
       return sum + recordMinutes * Number(record.machineSpeed || 0);
     }, 0);
     const goodProduction = sourceRecords.reduce((sum, record) => sum + Math.max(0, Number(record.realQty || 0) - Number(record.rejectQty || 0)), 0);
@@ -838,7 +853,7 @@ export default function OEEApplication() {
     const speedLossMinutes = sourceRecords.reduce((sum, record) => {
       const speed = Number(record.machineSpeed || 0);
       if (speed <= 0) return sum;
-      const recordOperatingMinutes = Math.max(0, elapsedMinutes(record.processStart, record.processEnd) - (record.losses || []).filter(loss => ['planned_availability', 'availability'].includes(loss.category)).reduce((lossSum, loss) => lossSum + Number(loss.duration || 0), 0));
+      const recordOperatingMinutes = Math.max(0, processElapsedMinutes(record) - (record.losses || []).filter(loss => ['planned_availability', 'availability'].includes(loss.category)).reduce((lossSum, loss) => lossSum + Number(loss.duration || 0), 0));
       return sum + Math.max(0, recordOperatingMinutes - Number(record.realQty || 0) / speed);
     }, 0);
     const lossTreeItems = [
@@ -878,7 +893,7 @@ export default function OEEApplication() {
       <div className="space-y-6 animate-in fade-in duration-300">
         <div className="overflow-hidden rounded-2xl bg-gradient-to-r from-slate-950 via-blue-950 to-blue-700 p-7 text-white shadow-xl"><div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-200">Centro de control · BIOEE B</p><h2 className="mt-3 text-4xl font-bold">Dashboard</h2><p className="mt-2 text-blue-100">Producción, eficiencia, pérdidas y control de sobrepeso.</p></div><div className="grid gap-3 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-semibold text-blue-100">Lote</label><select className="min-w-56 rounded-lg border border-white/20 bg-white p-2.5 text-slate-900" value={dashboardLot} onChange={(event) => { setDashboardLot(event.target.value); setDashboardOrder(''); }}><option value="">Todos los lotes</option>{dashboardLots.map(lot => <option key={lot}>{lot}</option>)}</select></div><div><label className="mb-1 block text-xs font-semibold text-blue-100">Orden de trabajo</label><select disabled={!dashboardLot} className="min-w-56 rounded-lg border border-white/20 bg-white p-2.5 text-slate-900 disabled:bg-slate-200 disabled:text-slate-500" value={dashboardOrder} onChange={(event) => setDashboardOrder(event.target.value)}><option value="">{dashboardLot ? 'Todas las OT' : 'Selecciona un lote'}</option>{dashboardOrders.map(order => <option key={order}>{order}</option>)}</select></div></div></div></div>
         {allSourceRecords.length === 0 ? <Card className="p-12 text-center"><Activity className="mx-auto mb-3 text-slate-300" size={48}/><h3 className="font-bold text-slate-700">Aún no hay datos productivos</h3><p className="mt-1 text-slate-500">Carga una plantilla de OT y registra una OEE para alimentar este dashboard.</p></Card> : sourceRecords.length === 0 ? <Card className="p-12 text-center"><Search className="mx-auto mb-3 text-slate-300" size={44}/><h3 className="font-bold text-slate-700">Sin datos para esta selección</h3><p className="mt-1 text-slate-500">Selecciona otro lote u orden de trabajo.</p></Card> : <>
-          <Card className="p-6"><div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Descomposición Lean</p><h3 className="mt-1 text-xl font-bold text-slate-900">Cómo se construye el OEE</h3><p className="text-sm text-slate-500">Secuencia del tiempo programado al tiempo equivalente de unidades buenas.</p></div><div className="rounded-xl bg-slate-950 px-5 py-3 text-white"><p className="text-xs uppercase tracking-wider text-slate-400">OEE consolidado</p><p className="text-3xl font-bold">{consolidatedOee.toFixed(2)}%</p><p className="mt-1 text-[10px] text-slate-400">Resultado del tiempo bueno ÷ tiempo programado</p></div></div><div className="space-y-4">
+          <Card className="p-6"><div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Descomposición Lean</p><h3 className="mt-1 text-xl font-bold text-slate-900">Cómo se construye el OEE</h3><p className="text-sm text-slate-500">Secuencia del tiempo programado al tiempo equivalente de unidades conformes.</p></div><div className="rounded-xl bg-slate-950 px-5 py-3 text-white"><p className="text-xs uppercase tracking-wider text-slate-400">OEE consolidado</p><p className="text-3xl font-bold">{consolidatedOee.toFixed(2)}%</p><p className="mt-1 text-[10px] text-slate-400">Resultado del tiempo conforme ÷ tiempo programado</p></div></div><div className="space-y-4">
             <div className="grid gap-2 md:grid-cols-[180px_1fr_150px] md:items-center"><div><p className="font-bold text-slate-800">Tiempo programado</p><p className="text-xs text-slate-500">Periodo completo entre inicio y fin</p></div><div className="h-12 overflow-hidden rounded-lg bg-slate-100"><div className="flex h-full w-full items-center justify-center bg-amber-300 px-3 text-sm font-bold text-amber-950">{plannedMinutes.toFixed(0)} min</div></div><div className="text-right"><p className="font-bold text-amber-700">{plannedMinutes.toFixed(0)} min</p><p className="text-xs text-slate-500">Base de la secuencia</p></div></div>
             <div className="grid gap-2 md:grid-cols-[180px_1fr_150px] md:items-center"><div><p className="font-bold text-slate-800">Tiempo disponible</p><p className="text-xs text-slate-500">Programado − detenciones</p></div><div className="flex h-12 overflow-hidden rounded-lg bg-slate-100"><div className="flex items-center justify-center bg-cyan-500 px-2 text-sm font-bold text-white" style={{width:`${boundedPercent(availabilityRate)}%`}}>{availableTimeMinutes.toFixed(0)} min</div><div className="flex flex-1 items-center justify-center bg-rose-500 px-2 text-xs font-semibold text-white">Pérdida {totalDowntime.toFixed(0)} min</div></div><div className="text-right"><p className="font-bold text-cyan-700">{availableTimeMinutes.toFixed(0)} min</p><p className="text-xs text-slate-500">De {plannedMinutes.toFixed(0)} min</p></div></div>
             <div className="grid gap-2 md:grid-cols-[180px_1fr_150px] md:items-center"><div><p className="font-bold text-slate-800">Tiempo a velocidad real</p><p className="text-xs text-slate-500">Disponible × factor de velocidad</p></div><div className="flex h-12 overflow-hidden rounded-lg bg-slate-100"><div className="flex items-center justify-center bg-orange-400 px-2 text-sm font-bold text-orange-950" style={{width:`${plannedMinutes ? Math.min(100,(speedEquivalentMinutes/plannedMinutes)*100) : 0}%`}}>{speedEquivalentMinutes.toFixed(0)} min</div><div className={`flex flex-1 items-center justify-center px-2 text-xs font-semibold text-white ${speedTimeDifference < 0 ? 'bg-emerald-600' : 'bg-rose-500'}`}>{speedTimeDifference < 0 ? `Ganancia ${Math.abs(speedTimeDifference).toFixed(0)} min` : `Pérdida ${speedTimeDifference.toFixed(0)} min`}</div></div><div className="text-right"><p className="font-bold text-orange-600">{speedEquivalentMinutes.toFixed(0)} min</p><p className="text-xs text-slate-500">De {availableTimeMinutes.toFixed(0)} min</p></div></div>
@@ -968,7 +983,7 @@ export default function OEEApplication() {
                              if (current?.id === ot.id) return current;
                              if (sessionDrafts[ot.id]) return sessionDrafts[ot.id];
                              const standard = findProductStandard(ot.product, productStandards);
-                             return {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, machineSpeed: 0, productionRegistered: false, losses: [], supportPersonnelCount: 0, overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: standard?.target ?? ot.targetWeight ?? '', measurementUnit: standard?.unit || 'g', liquidMeasurement: Boolean(standard?.liquid), assistantMessages: [], processStart: '00:00', processEnd: '00:00', performanceEndTime: ''};
+                             return {...ot, operator: currentUser.name, registrar: currentUser.name, shift: SHIFTS[0], realQty: 0, goodQty: 0, rejectQty: 0, reprocessQty: 0, wasteQty: 0, samplingQty: 0, overweightDeviationQty: 0, machineSpeed: 0, productionRegistered: false, losses: [], supportPersonnelCount: 0, overweights: ot.overweights || [], materialDiscards: ot.materialDiscards || [], targetWeight: standard?.target ?? ot.targetWeight ?? '', measurementUnit: standard?.unit || 'g', liquidMeasurement: Boolean(standard?.liquid), assistantMessages: [], processStartDate: currentDateInput(), processStart: '00:00', processEndDate: currentDateInput(), processEnd: '00:00', performanceEndTime: ''};
                            });
                           setWorkOrders(current => current.map(order => order.id === ot.id ? { ...order, status: 'in_progress', registrar: currentUser.name } : order));
                           setCurrentView('active_production');
@@ -993,7 +1008,7 @@ export default function OEEApplication() {
     const [lossModalOpen, setLossModalOpen] = useState(() => Boolean(persistedUiDrafts.lossModalOpen));
     const [lossValidationMessage, setLossValidationMessage] = useState('');
     const [lossType, setLossType] = useState(() => persistedUiDrafts.lossType || 'availability'); // availability, performance, quality
-    const [lossForm, setLossForm] = useState(() => persistedUiDrafts.lossForm || { cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
+    const [lossForm, setLossForm] = useState(() => persistedUiDrafts.lossForm || { cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', samplingQty: '', machineSpeed: '', supportCount: '0', comment: '' });
     const [editingLossId, setEditingLossId] = useState(() => persistedUiDrafts.editingLossId || null);
     
     const [ticketModalOpen, setTicketModalOpen] = useState(() => Boolean(persistedUiDrafts.ticketModalOpen));
@@ -1029,15 +1044,18 @@ export default function OEEApplication() {
 
     const metrics = calculateSessionMetrics(activeSession);
     const downtimeMetrics = calculateDowntimeMetrics(activeSession);
-    const mandatoryReady = Boolean(activeSession.processStart && activeSession.processEnd && activeSession.productionRegistered);
+    const mandatoryReady = Boolean(activeSession.processStartDate && activeSession.processStart && activeSession.processEndDate && activeSession.processEnd && activeSession.productionRegistered);
     const productionRealPreview = Math.max(0, Math.round(
       (Number(lossForm.machineSpeed) || 0) * Math.max(0,
-        elapsedMinutes(activeSession.processStart, activeSession.processEnd) -
+        processElapsedMinutes(activeSession) -
         activeSession.losses
           .filter(loss => loss.category === 'planned_availability' || loss.category === 'availability')
           .reduce((sum, loss) => sum + Number(loss.duration || 0), 0)
       )
     ));
+    const missingProductionUnits = Math.max(0, productionRealPreview - Number(lossForm.goodQty || 0));
+    const manuallyJustifiedUnits = Number(lossForm.reprocessQty || 0) + Number(lossForm.wasteQty || 0) + Number(lossForm.samplingQty || 0);
+    const overweightDeviationPreview = Math.max(0, missingProductionUnits - manuallyJustifiedUnits);
     const requiresMaintenanceTicket = lossForm.cause === 'Avería mecánica' || lossForm.cause === 'Avería eléctrica';
     const updateProcessTime = (field, value) => {
       setActiveSession(current => {
@@ -1049,7 +1067,7 @@ export default function OEEApplication() {
           .reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
         return {
           ...nextSession,
-          realQty: Math.max(0, Math.round(Number(nextSession.machineSpeed) * Math.max(0, elapsedMinutes(nextSession.processStart, nextSession.processEnd) - totalDowntime)))
+          realQty: Math.max(0, Math.round(Number(nextSession.machineSpeed) * Math.max(0, processElapsedMinutes(nextSession) - totalDowntime)))
         };
       });
     };
@@ -1066,12 +1084,14 @@ export default function OEEApplication() {
       const qualityLosses = normalizedLosses.filter(loss => loss.category === 'quality');
       const reprocessQty = qualityLosses.reduce((sum, loss) => sum + Number(loss.reprocessQty || 0), 0);
       const wasteQty = qualityLosses.reduce((sum, loss) => sum + Number(loss.wasteQty || 0), 0);
-      const rejectQty = reprocessQty + wasteQty;
+      const samplingQty = qualityLosses.reduce((sum, loss) => sum + Number(loss.samplingQty || 0), 0);
+      const overweightDeviationQty = qualityLosses.reduce((sum, loss) => sum + Number(loss.overweightDeviationQty || 0), 0);
+      const rejectQty = reprocessQty + wasteQty + samplingQty + overweightDeviationQty;
       const totalDowntime = normalizedLosses
         .filter(loss => loss.category === 'planned_availability' || loss.category === 'availability')
         .reduce((sum, loss) => sum + Number(loss.duration || 0), 0);
       const calculatedRealQty = session.productionRegistered && Number(session.machineSpeed) > 0
-        ? Math.max(0, Math.round(Number(session.machineSpeed) * Math.max(0, elapsedMinutes(session.processStart, session.processEnd) - totalDowntime)))
+        ? Math.max(0, Math.round(Number(session.machineSpeed) * Math.max(0, processElapsedMinutes(session) - totalDowntime)))
         : Math.max(0, Number(session.realQty || 0));
       const registeredGoodQty = qualityLosses.length
         ? qualityLosses.reduce((sum, loss) => sum + Number(loss.goodQty || 0), 0)
@@ -1082,6 +1102,8 @@ export default function OEEApplication() {
         performanceEndTime: '',
         reprocessQty,
         wasteQty,
+        samplingQty,
+        overweightDeviationQty,
         rejectQty,
         realQty: calculatedRealQty,
         goodQty: registeredGoodQty
@@ -1090,7 +1112,7 @@ export default function OEEApplication() {
 
     const resetLossEditor = () => {
       setEditingLossId(null);
-      setLossForm({ cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', machineSpeed: '', supportCount: '0', comment: '' });
+      setLossForm({ cause: '', durationHours: '0', durationMinutes: '0', goodQty: '', reprocessQty: '', wasteQty: '', samplingQty: '', machineSpeed: '', supportCount: '0', comment: '' });
       setMaintenanceTicket(null);
       setTicketForm({ priority: 'Media', detail: '', reportedBy: DUMMY_USER.name });
     };
@@ -1108,7 +1130,7 @@ export default function OEEApplication() {
       setLossType(loss.category);
       setLossForm({
         cause: loss.cause || '', durationHours: String(Math.floor(Number(loss.duration || 0) / 60)), durationMinutes: String(Number(loss.duration || 0) % 60), goodQty: String(loss.goodQty ?? activeSession.goodQty ?? ''),
-        reprocessQty: String(loss.reprocessQty || ''), wasteQty: String(loss.wasteQty || ''),
+        reprocessQty: String(loss.reprocessQty || ''), wasteQty: String(loss.wasteQty || ''), samplingQty: String(loss.samplingQty || ''),
         machineSpeed: String(loss.machineSpeed ?? activeSession.machineSpeed ?? ''), supportCount: String(loss.supportPersonnelCount || 0), comment: loss.comment || ''
       });
       setMaintenanceTicket(loss.ticket || null);
@@ -1144,7 +1166,7 @@ export default function OEEApplication() {
         setLossValidationMessage('Selecciona una causa antes de guardar la detención.');
         return;
       }
-      if ((lossType === 'availability' || lossType === 'planned_availability') && selectedDuration <= 0) {
+      if (lossType === 'planned_availability' && selectedDuration <= 0) {
         setLossValidationMessage('Selecciona una duración mayor a 0 minutos.');
         return;
       }
@@ -1166,8 +1188,8 @@ export default function OEEApplication() {
           return;
         }
         const missingUnits = productionRealPreview - Number(lossForm.goodQty);
-        if (missingUnits > 0 && Number(lossForm.reprocessQty) + Number(lossForm.wasteQty) !== missingUnits) {
-          setLossValidationMessage(`Sustenta las ${missingUnits.toLocaleString()} unidades faltantes entre reproceso y desperdicio.`);
+        if (manuallyJustifiedUnits > missingUnits) {
+          setLossValidationMessage(`Reproceso, desperdicio y muestreo no pueden superar las ${missingUnits.toLocaleString()} unidades faltantes.`);
           return;
         }
       }
@@ -1175,12 +1197,14 @@ export default function OEEApplication() {
       const newLoss = {
         id: Date.now(),
         category: lossType,
-        cause: lossType === 'quality' ? 'Productos buenos' : lossForm.cause,
+        cause: lossType === 'quality' ? 'Productos conformes' : lossForm.cause,
         duration: lossType === 'performance' || lossType === 'quality' ? 0 : selectedDuration,
-        qty: lossType === 'quality' ? (parseInt(lossForm.reprocessQty) || 0) + (parseInt(lossForm.wasteQty) || 0) : 0,
+        qty: lossType === 'quality' ? missingProductionUnits : 0,
         goodQty: lossType === 'quality' ? parseInt(lossForm.goodQty) || 0 : null,
         reprocessQty: lossType === 'quality' ? parseInt(lossForm.reprocessQty) || 0 : 0,
         wasteQty: lossType === 'quality' ? parseInt(lossForm.wasteQty) || 0 : 0,
+        samplingQty: lossType === 'quality' ? parseInt(lossForm.samplingQty) || 0 : 0,
+        overweightDeviationQty: lossType === 'quality' ? overweightDeviationPreview : 0,
         machineSpeed: lossType === 'quality' ? Number(lossForm.machineSpeed) || 0 : null,
         supportPersonnelCount: lossType === 'planned_availability' ? Number(lossForm.supportCount) || 0 : 0,
         comment: lossForm.comment,
@@ -1350,14 +1374,17 @@ export default function OEEApplication() {
               <p className="text-slate-400 text-sm">{activeSession.product} | {activeSession.machine}</p>
             </div>
           </div>
-          <div className="flex gap-6 text-sm">
+          <div className="flex flex-wrap items-end gap-6 text-sm">
             <div className="text-center">
               <p className="text-slate-400">Operador</p>
               <p className="font-semibold">{activeSession.operator}</p>
               <p className="text-xs text-slate-400">{Number(activeSession.supportPersonnelCount || 0)} persona(s) de apoyo</p>
             </div>
             <div className="text-center">
-              <div className="flex items-end gap-2"><TimeField label="Inicio del proceso" value={activeSession.processStart} onChange={(value) => updateProcessTime('processStart', value)}/><span className="pb-3 text-slate-400">a</span><TimeField label="Fin del proceso" value={activeSession.processEnd} onChange={(value) => updateProcessTime('processEnd', value)}/></div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-2"><label className="block text-left text-xs font-medium text-slate-400">Día de inicio</label><input type="date" value={activeSession.processStartDate || ''} onChange={(event) => updateProcessTime('processStartDate', event.target.value)} className="w-full rounded-lg border border-slate-500 bg-white px-3 py-2 text-slate-900"/><TimeField label="Hora de inicio" value={activeSession.processStart} onChange={(value) => updateProcessTime('processStart', value)}/></div>
+                <div className="space-y-2"><label className="block text-left text-xs font-medium text-slate-400">Día de fin</label><input type="date" min={activeSession.processStartDate || undefined} value={activeSession.processEndDate || ''} onChange={(event) => updateProcessTime('processEndDate', event.target.value)} className="w-full rounded-lg border border-slate-500 bg-white px-3 py-2 text-slate-900"/><TimeField label="Hora de fin" value={activeSession.processEnd} onChange={(value) => updateProcessTime('processEnd', value)}/></div>
+              </div>
             </div>
             <div className="text-center hidden md:block">
               <p className="text-slate-400">Planificado</p>
@@ -1377,7 +1404,7 @@ export default function OEEApplication() {
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <button onClick={() => openNewLoss('planned_availability')} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-sky-200 bg-white p-4 transition-all hover:border-sky-500 hover:shadow-md"><div className="mb-2 rounded-full bg-sky-100 p-3 text-sky-700"><CheckSquare size={24}/></div><span className="font-bold text-slate-800">Detenciones planificadas</span><span className="text-center text-xs text-slate-500">Set up, limpieza y mantenimiento preventivo</span></button>
           <button onClick={() => openNewLoss('availability')} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-rose-200 bg-white p-4 transition-all hover:border-rose-500 hover:shadow-md"><div className="mb-2 rounded-full bg-rose-100 p-3 text-rose-600"><Pause size={24}/></div><span className="font-bold text-slate-800">Detenciones no planificadas</span><span className="text-center text-xs text-slate-500">Averías, bloqueos, cortes de servicio y otros</span></button>
-          <button onClick={() => { const production = activeSession.losses.find(loss => loss.category === 'quality'); production ? openEditLoss(production) : openNewLoss('quality'); }} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-emerald-200 bg-white p-4 transition-all hover:border-emerald-500 hover:shadow-md"><div className="mb-2 rounded-full bg-emerald-100 p-3 text-emerald-700"><PackageCheck size={24}/></div><span className="font-bold text-slate-800">Producción real</span><span className="text-center text-xs text-slate-500">Unidades buenas, reproceso y desperdicio</span></button>
+          <button onClick={() => { const production = activeSession.losses.find(loss => loss.category === 'quality'); production ? openEditLoss(production) : openNewLoss('quality'); }} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-emerald-200 bg-white p-4 transition-all hover:border-emerald-500 hover:shadow-md"><div className="mb-2 rounded-full bg-emerald-100 p-3 text-emerald-700"><PackageCheck size={24}/></div><span className="font-bold text-slate-800">Producción real</span><span className="text-center text-xs text-slate-500">Unidades conformes y justificación de faltantes</span></button>
           <button onClick={openOverweightModal} className="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-cyan-200 bg-white p-4 transition-all hover:border-cyan-500 hover:shadow-md"><div className="mb-2 rounded-full bg-cyan-100 p-3 text-cyan-700"><Scale size={24}/></div><span className="font-bold text-slate-800">Registrar {measurementTitle.toLowerCase()}</span><span className="text-center text-xs text-slate-500">Muestreos, mediciones y hora de control</span></button>
         </div>
         {/* Recent Events Log */}
@@ -1405,7 +1432,7 @@ export default function OEEApplication() {
                         {loss.category === 'planned_availability' ? <CheckSquare size={18}/> : loss.category === 'availability' ? <Pause size={18}/> : loss.category === 'performance' ? <AlertOctagon size={18}/> : <AlertTriangle size={18}/>}
                       </div>
                       <div>
-                        <p className="font-medium text-slate-800">{loss.category === 'quality' ? 'Productos buenos' : loss.cause}</p>
+                        <p className="font-medium text-slate-800">{loss.category === 'quality' ? 'Productos conformes' : loss.cause}</p>
                         <p className="text-xs text-slate-500">{loss.time} {loss.comment && `- ${loss.comment}`}</p>
                         {loss.category === 'planned_availability' && Number(loss.supportPersonnelCount || 0) > 0 && <p className="mt-1 text-xs font-medium text-sky-700">Personal de apoyo: {Number(loss.supportPersonnelCount)} persona(s)</p>}
                         {loss.ticketCode && (
@@ -1417,8 +1444,8 @@ export default function OEEApplication() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                      {loss.category === 'performance' ? <p className="text-sm font-semibold text-purple-700">Registro cualitativo</p> : loss.duration > 0 && <p className="font-bold text-slate-800">{loss.duration} min</p>}
-                      {loss.category === 'quality' ? <p className="font-bold text-emerald-700">{Number(loss.goodQty || 0).toLocaleString()} und buenas</p> : loss.qty > 0 && <p className="font-bold text-rose-600">{loss.qty} und</p>}
+                      {loss.category === 'availability' && Number(loss.duration || 0) <= 0 ? <p className="rounded bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">Aun no se ha registrado tiempo</p> : loss.category === 'performance' ? <p className="text-sm font-semibold text-purple-700">Registro cualitativo</p> : loss.duration > 0 && <p className="font-bold text-slate-800">{loss.duration} min</p>}
+                      {loss.category === 'quality' ? <p className="font-bold text-emerald-700">{Number(loss.goodQty || 0).toLocaleString()} und conformes</p> : loss.qty > 0 && <p className="font-bold text-rose-600">{loss.qty} und</p>}
                       </div>
                       {role === 'responsible_operator' && <div className="flex gap-1"><button title="Editar evento" aria-label={`Editar ${loss.cause}`} onClick={() => openEditLoss(loss)} className="rounded-lg border border-blue-200 p-2 text-blue-600 hover:bg-blue-50"><Edit size={16}/></button><button title="Eliminar evento" aria-label={`Eliminar ${loss.cause}`} onClick={() => deleteLoss(loss)} className="rounded-lg border border-rose-200 p-2 text-rose-600 hover:bg-rose-50"><Trash2 size={16}/></button></div>}
                     </div>
@@ -1432,7 +1459,7 @@ export default function OEEApplication() {
         {/* Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-white border-t border-slate-200 p-4 flex justify-between items-center z-40">
           <Button variant="ghost">Guardar Borrador</Button>
-          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Registra la hora de inicio, fin y producción real'}>
+          <Button variant="primary" disabled={!mandatoryReady} onClick={handleFinish} className="!px-8" title={mandatoryReady ? '' : 'Registra los días, horas de inicio y fin, y la producción real'}>
             <CheckCircle size={20} /> Finalizar y Enviar a Revisión
           </Button>
         </div>
@@ -1473,6 +1500,7 @@ export default function OEEApplication() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Duración de la detención</label>
                 <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-semibold text-slate-500">Horas</label><select className="w-full rounded-lg border border-slate-300 bg-white p-3" value={lossForm.durationHours} onChange={(e) => setLossForm({...lossForm, durationHours: e.target.value})}>{Array.from({length: 25}, (_, hour) => <option key={hour} value={hour}>{hour} h</option>)}</select></div><div><label className="mb-1 block text-xs font-semibold text-slate-500">Minutos</label><select className="w-full rounded-lg border border-slate-300 bg-white p-3" value={lossForm.durationMinutes} onChange={(e) => setLossForm({...lossForm, durationMinutes: e.target.value})}>{Array.from({length: 60}, (_, minute) => <option key={minute} value={minute}>{minute} min</option>)}</select></div></div>
+                {lossType === 'availability' && <p className="mt-2 text-xs text-amber-700">Opcional: puedes registrar la detención ahora y completar el tiempo posteriormente desde Eventos Registrados.</p>}
               </div>
             )}
 
@@ -1487,8 +1515,8 @@ export default function OEEApplication() {
               <div className="space-y-4">
                 <div><label className="block text-sm font-semibold text-slate-800 mb-1">Velocidad de máquina (und/min)</label><input type="number" min="0.01" step="0.01" className="w-full rounded-lg border border-purple-300 p-3 text-lg font-semibold" value={lossForm.machineSpeed} onChange={(e) => setLossForm({...lossForm, machineSpeed: e.target.value})} placeholder="Ingresa la velocidad registrada"/></div>
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-4"><p className="text-sm font-semibold text-blue-900">Producción real calculada</p><p className="mt-1 text-3xl font-bold text-blue-700">{productionRealPreview.toLocaleString()} und</p></div>
-                <div><label className="block text-sm font-semibold text-slate-800 mb-1">Registra tus unidades buenas</label><input type="number" min="0" max={productionRealPreview} className="w-full rounded-lg border border-emerald-300 p-3 text-lg font-semibold" value={lossForm.goodQty} onChange={(e) => setLossForm({...lossForm, goodQty: e.target.value})} placeholder={`Máximo calculado: ${productionRealPreview}`}/></div>
-                {Number(lossForm.goodQty) < productionRealPreview && lossForm.goodQty !== '' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="font-semibold text-amber-900">La producción real calculada es {productionRealPreview.toLocaleString()} unidades; sustenta las {(productionRealPreview - Number(lossForm.goodQty)).toLocaleString()} unidades no buenas.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="block text-sm font-medium text-amber-800 mb-1">A reproceso (und)</label><input type="number" min="0" className="w-full rounded-lg border border-amber-300 p-3 text-lg" value={lossForm.reprocessQty} onChange={(e) => setLossForm({...lossForm, reprocessQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">Puede volver a fabricarse.</p></div><div><label className="block text-sm font-medium text-rose-800 mb-1">A desperdicio (und)</label><input type="number" min="0" className="w-full rounded-lg border border-rose-300 p-3 text-lg" value={lossForm.wasteQty} onChange={(e) => setLossForm({...lossForm, wasteQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">No puede reprocesarse.</p></div></div><p className="mt-2 text-xs text-amber-800">Sustento registrado: {(Number(lossForm.reprocessQty) + Number(lossForm.wasteQty)).toLocaleString()} de {(productionRealPreview - Number(lossForm.goodQty)).toLocaleString()} unidades.</p></div>}
+                <div><label className="block text-sm font-semibold text-slate-800 mb-1">Registra tus unidades conformes</label><input type="number" min="0" max={productionRealPreview} className="w-full rounded-lg border border-emerald-300 p-3 text-lg font-semibold" value={lossForm.goodQty} onChange={(e) => setLossForm({...lossForm, goodQty: e.target.value})} placeholder={`Máximo calculado: ${productionRealPreview}`}/></div>
+                {Number(lossForm.goodQty) < productionRealPreview && lossForm.goodQty !== '' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="font-semibold text-amber-900">La producción real calculada es {productionRealPreview.toLocaleString()} unidades; sustenta las {missingProductionUnits.toLocaleString()} unidades faltantes.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="block text-sm font-medium text-amber-800 mb-1">A reproceso (und)</label><input type="number" min="0" className="w-full rounded-lg border border-amber-300 p-3 text-lg" value={lossForm.reprocessQty} onChange={(e) => setLossForm({...lossForm, reprocessQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">Puede volver a fabricarse.</p></div><div><label className="block text-sm font-medium text-rose-800 mb-1">A desperdicio (und)</label><input type="number" min="0" className="w-full rounded-lg border border-rose-300 p-3 text-lg" value={lossForm.wasteQty} onChange={(e) => setLossForm({...lossForm, wasteQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">No puede reprocesarse.</p></div><div><label className="block text-sm font-medium text-blue-800 mb-1">Muestreo (und)</label><input type="number" min="0" className="w-full rounded-lg border border-blue-300 p-3 text-lg" value={lossForm.samplingQty} onChange={(e) => setLossForm({...lossForm, samplingQty: e.target.value})}/><p className="mt-1 text-xs text-slate-500">Unidades conformes utilizadas para control.</p></div><div><label className="block text-sm font-medium text-purple-800 mb-1">Desviación por sobrepeso (und)</label><input readOnly type="number" className="w-full rounded-lg border border-purple-300 bg-purple-50 p-3 text-lg font-bold text-purple-800" value={overweightDeviationPreview}/><p className="mt-1 text-xs text-slate-500">Calculada automáticamente con el saldo faltante.</p></div></div><p className={`mt-3 text-xs font-semibold ${manuallyJustifiedUnits > missingProductionUnits ? 'text-rose-700' : 'text-amber-800'}`}>Sustento total: {(manuallyJustifiedUnits + overweightDeviationPreview).toLocaleString()} de {missingProductionUnits.toLocaleString()} unidades.</p></div>}
               </div>
             )}
 
@@ -1771,7 +1799,7 @@ export default function OEEApplication() {
         const lowerInput = normalizeText(input);
         const knowledge = ASSISTANT_KNOWLEDGE.find(item => item.keywords.some(keyword => lowerInput.includes(normalizeText(keyword))));
         let aiResponse = knowledge?.answer;
-        if (!aiResponse && (lowerInput.includes('disponibilidad') || lowerInput.includes('oee'))) aiResponse = 'La disponibilidad compara el tiempo productivo con el tiempo total de operación. En BIOEE B, el OEE se calcula como el tiempo teórico requerido para fabricar las unidades buenas, dividido entre el tiempo planificado entre inicio y fin.';
+        if (!aiResponse && (lowerInput.includes('disponibilidad') || lowerInput.includes('oee'))) aiResponse = 'La disponibilidad compara el tiempo productivo con el tiempo total de operación. En BIOEE B, el OEE se calcula como el tiempo teórico requerido para fabricar las unidades conformes, dividido entre el tiempo planificado entre inicio y fin.';
         if (!aiResponse) aiResponse = 'Puedo orientarte sobre cambios de formato, limpieza, mantenimiento preventivo, averías mecánicas o eléctricas, bloqueos, cortes de servicios y controles de sobrepeso o sobremedida. Describe el evento o la duda con tus propias palabras.';
 
         setMessages([...newMessages, { role: 'ai', text: aiResponse }]);
